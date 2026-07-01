@@ -1,4 +1,4 @@
-name: local-standard
+name: graphrag-toolkit-rdf
 services:
   neo4j-local:
     image: neo4j:5.25-community
