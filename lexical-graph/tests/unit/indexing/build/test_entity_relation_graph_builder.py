@@ -71,6 +71,7 @@ class TestEntityRelationBuilding:
         call_args = client.execute_query_with_retry.call_args
         params = call_args[0][1]  # second positional arg is properties
         assert params['params'][0]['p'] == 'relates_to'
+        assert params['params'][0]['fact_id'] == 'f1'
 
     def test_build_multiple_relations(self):
         """Verify build handles multiple fact nodes."""

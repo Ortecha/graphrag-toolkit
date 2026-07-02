@@ -108,9 +108,9 @@ def translate_write(cypher: str, parameters: Dict[str, Any]) -> Optional[str]:
         elif marker.startswith('insert entities'):
             ops.append(_entity(row, graph))
         elif marker.startswith('insert entity spo'):
-            ops.append(_relation(row['s_id'], row['o_id'], row.get('p'), graph))
+            ops.append(_relation(row['s_id'], row['o_id'], row.get('p'), graph, row.get('fact_id')))
         elif marker.startswith('insert entity spc'):
-            ops.append(_relation(row['s_id'], row['c_id'], row.get('p'), graph))
+            ops.append(_relation(row['s_id'], row['c_id'], row.get('p'), graph, row.get('fact_id')))
         elif marker.startswith('insert graph summary'):
             ops.append(_graph_summary(cypher, row, graph))
         else:
@@ -219,7 +219,7 @@ def _edge(row, graph, a_key, a_param, b_key, b_param, rel_label) -> Optional[str
     return _insert_data('\n'.join(triples), graph)
 
 
-def _relation(subject_id, object_id, predicate_value, graph) -> str:
+def _relation(subject_id, object_id, predicate_value, graph, fact_id=None) -> str:
     s_iri = instance_iri('entity', subject_id)
     o_iri = instance_iri('entity', object_id)
     rel = relation_iri(subject_id, predicate_value, object_id)
@@ -235,6 +235,13 @@ def _relation(subject_id, object_id, predicate_value, graph) -> str:
     ]
     if predicate_value is not None:
         triples.append(f'{rel} {term("value")} {_lit(predicate_value)} .')
+    if fact_id is not None:
+        fact_iri = instance_iri('fact', fact_id)
+        triples.extend([
+            f'{fact_iri} {RDF_TYPE} {term("Fact")} .',
+            f'{fact_iri} {term("id")} {_lit(fact_id)} .',
+            f'{rel} {term("supportedByFact")} {fact_iri} .',
+        ])
     return _insert_data('\n'.join(triples), graph)
 
 
