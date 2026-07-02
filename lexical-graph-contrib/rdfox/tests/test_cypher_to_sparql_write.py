@@ -61,6 +61,16 @@ def test_spo_relation_node_and_direct_triple():
     assert 'related>' in sparql             # direct traversal triple
 
 
+def test_spo_relation_links_to_supporting_fact_when_available():
+    cypher = ("// insert entity SPO relations\nUNWIND $params AS params\n"
+              "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
+              "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
+              "MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)")
+    sparql = translate_write(cypher, _p({'s_id': 'a', 'o_id': 'b', 'p': 'manages', 'fact_id': 'f1'}))
+    assert 'supportedByFact>' in sparql
+    assert 'fact/f1' in sparql
+
+
 def test_graph_summary_counter_is_read_modify_write():
     cypher = ("// insert graph summary\nUNWIND $params AS params\n"
               "MERGE (sc:`__SYS_Class__`{sysClassId: params.sc_id})\n"
