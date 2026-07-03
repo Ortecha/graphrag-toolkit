@@ -7,12 +7,12 @@ packages = ["src/graphrag_toolkit_contrib"]
 
 
 [project]
-name = "graphrag-toolkit-lexical-graph-rdfox"
+name = "graphrag-toolkit-lexical-graph-sparql"
 version = "0.1.0"
-description = "RDFox (RDF/SPARQL) support for the AWS GraphRAG Toolkit, lexical graph"
+description = "RDF/SPARQL endpoint support for the AWS GraphRAG Toolkit lexical graph"
 requires-python = ">=3.10"
 dynamic = ["dependencies"]
 license = "Apache-2.0"
 
 [tool.hatch.metadata.hooks.requirements_txt]
-files = ["src/graphrag_toolkit_contrib/lexical_graph/storage/graph/rdfox/requirements.txt"]
+files = ["src/graphrag_toolkit_contrib/lexical_graph/storage/graph/sparql/requirements.txt"]

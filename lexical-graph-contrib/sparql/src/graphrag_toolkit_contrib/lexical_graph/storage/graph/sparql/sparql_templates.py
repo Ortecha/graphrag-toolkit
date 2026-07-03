@@ -8,14 +8,8 @@ query. This module maps each one to a hand-authored SPARQL query and reshapes
 the rows into the exact ``List[dict]`` shape the calling retriever expects
 (mirroring Neo4j's ``record.data()``).
 
-Status: the write path is implemented and verified first (per the agreed
-milestone). Read templates are the next milestone; until a given query is
-implemented its handler raises ``UnsupportedReadError`` with the marker, so the
+Unsupported reads raise ``UnsupportedReadError`` with the query marker so the
 system fails loudly rather than returning silently-wrong results.
-
-Implemented so far:
-* ``// get facts for statements`` – demonstrates the flat-query + Python-reshape
-  pattern the remaining templates will follow.
 """
 
 import re
@@ -31,9 +25,7 @@ from graphrag_toolkit.lexical_graph.versioning import (
     TIMESTAMP_UPPER_BOUND,
 )
 
-from .ontology import LEXICAL_SCHEMA, sparql_literal
-
-_PREFIX = f'PREFIX lg: <{LEXICAL_SCHEMA}>'
+from .ontology import DEFAULT_NAMESPACE, NamespaceConfig, sparql_literal
 
 # Mirrors graphrag_toolkit ...indexing.constants.LOCAL_ENTITY_CLASSIFICATION.
 LOCAL_ENTITY_CLASSIFICATION = '__Local_Entity__'
@@ -43,25 +35,28 @@ class UnsupportedReadError(NotImplementedError):
     """Raised for retriever queries whose SPARQL template is not yet written."""
 
 
-def execute_read(client, cypher: str, parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
+def execute_read(client,
+                 cypher: str,
+                 parameters: Dict[str, Any],
+                 namespace: NamespaceConfig = DEFAULT_NAMESPACE) -> List[Dict[str, Any]]:
     """Dispatch a read query to its SPARQL template and reshape the results."""
     marker = _marker(cypher) or ''
 
     if marker.startswith('get statements grouped by topic and source'):
-        return _statements_grouped_by_topic_and_source(client, cypher, parameters)
+        return _statements_grouped_by_topic_and_source(client, cypher, parameters, namespace)
     if marker.startswith('get facts for statements'):
-        return _facts_for_statements(client, parameters)
+        return _facts_for_statements(client, parameters, namespace)
     if marker.startswith('single entity-based graph search'):
-        return _single_entity_based_graph_search(client, parameters)
+        return _single_entity_based_graph_search(client, parameters, namespace)
     if marker.startswith('multiple entity-based graph search'):
-        return _multiple_entity_based_graph_search(client, parameters)
+        return _multiple_entity_based_graph_search(client, parameters, namespace)
     if marker.startswith('get complements matching subject'):
-        return _complements_matching_subject(client, parameters)
+        return _complements_matching_subject(client, parameters, namespace)
     if marker.startswith('get subjects matching complement') or marker.startswith('get real subjects'):
-        return _subjects_matching_complement(client, parameters)
+        return _subjects_matching_complement(client, parameters, namespace)
 
     raise UnsupportedReadError(
-        f'Read query not yet supported on the RDFox backend [marker: {marker!r}]. '
+        f'Read query not yet supported on the SPARQL backend [marker: {marker!r}]. '
         f'Read templates are the next implementation milestone.'
     )
 
@@ -72,139 +67,154 @@ def _param_rows(parameters):
     return [parameters] if parameters else []
 
 
-def _complements_matching_subject(client, parameters):
+def _complements_matching_subject(client, parameters, namespace: NamespaceConfig):
     """Local-entity rewrite lookup: real entities that have a local-entity twin
     (same search_str). Empty when local entities are disabled."""
     out = []
+    lg = namespace.prefix_ref
     for row in _param_rows(parameters):
         n_id = row.get('nId')
         if not n_id:
             continue
-        sparql = f'''{_PREFIX}
+        sparql = f'''{namespace.sparql_prefixes()}
 SELECT ?n_id ?c_id WHERE {{
-  ?n lg:id ?n_id ; lg:search_str ?ss ; lg:class ?ncls .
+  ?n {lg}id ?n_id ; {lg}search_str ?ss ; {lg}class ?ncls .
   FILTER(?n_id = {sparql_literal(n_id)})
   FILTER(?ncls != "{LOCAL_ENTITY_CLASSIFICATION}")
-  ?c lg:search_str ?ss ; lg:class "{LOCAL_ENTITY_CLASSIFICATION}" ; lg:id ?c_id .
+  ?c {lg}search_str ?ss ; {lg}class "{LOCAL_ENTITY_CLASSIFICATION}" ; {lg}id ?c_id .
 }}'''
         out.extend(client.query(sparql))
     return out
 
 
-def _subjects_matching_complement(client, parameters):
+def _subjects_matching_complement(client, parameters, namespace: NamespaceConfig):
     """Local-entity rewrite lookup: pair of nodes by id. Empty unless both
     exist (i.e. a complement that also occurs as a real entity)."""
     out = []
+    lg = namespace.prefix_ref
     for row in _param_rows(parameters):
         n_id, c_id = row.get('nId'), row.get('cId')
         if not n_id or not c_id:
             continue
-        sparql = f'''{_PREFIX}
+        sparql = f'''{namespace.sparql_prefixes()}
 SELECT ?n_id ?c_id WHERE {{
-  ?n lg:id ?n_id . FILTER(?n_id = {sparql_literal(n_id)})
-  ?c lg:id ?c_id . FILTER(?c_id = {sparql_literal(c_id)})
+  ?n {lg}id ?n_id . FILTER(?n_id = {sparql_literal(n_id)})
+  ?c {lg}id ?c_id . FILTER(?c_id = {sparql_literal(c_id)})
 }}'''
         out.extend(client.query(sparql))
     return out
 
 
-def _single_entity_based_graph_search(client, parameters) -> List[Dict[str, Any]]:
+def _single_entity_based_graph_search(client,
+                                      parameters,
+                                      namespace: NamespaceConfig) -> List[Dict[str, Any]]:
     start_id = parameters.get('startId')
     if not start_id:
         return []
+    lg = namespace.prefix_ref
     fact_pattern = f'''
-  ?entity lg:id {sparql_literal(start_id)} ;
-          lg:subject ?fact .'''
-    return _statement_ids_for_fact_pattern(client, fact_pattern, parameters)
+  ?entity {lg}id {sparql_literal(start_id)} ;
+          {lg}subject ?fact .'''
+    return _statement_ids_for_fact_pattern(client, fact_pattern, parameters, namespace)
 
 
-def _multiple_entity_based_graph_search(client, parameters) -> List[Dict[str, Any]]:
+def _multiple_entity_based_graph_search(client,
+                                        parameters,
+                                        namespace: NamespaceConfig) -> List[Dict[str, Any]]:
     start_id = parameters.get('startId')
     end_ids = parameters.get('endIds', []) or []
     if not start_id or not end_ids:
         return []
+    lg = namespace.prefix_ref
     end_values = ' '.join(sparql_literal(e) for e in end_ids)
     fact_pattern = f'''
-  ?start lg:id {sparql_literal(start_id)} .
+  ?start {lg}id {sparql_literal(start_id)} .
   VALUES ?endId {{ {end_values} }}
-  ?end lg:id ?endId .
+  ?end {lg}id ?endId .
   {{
     {{
-      ?rel lg:supportedByFact ?fact .
+      ?rel {lg}supportedByFact ?fact .
       {{
-        {{ ?rel lg:relSubject ?start ; lg:relObject ?end . }}
+        {{ ?rel {lg}relSubject ?start ; {lg}relObject ?end . }}
         UNION
-        {{ ?rel lg:relSubject ?end ; lg:relObject ?start . }}
+        {{ ?rel {lg}relSubject ?end ; {lg}relObject ?start . }}
       }}
     }}
     UNION
     {{
-      ?rel1 lg:supportedByFact ?fact .
+      ?rel1 {lg}supportedByFact ?fact .
       {{
-        {{ ?rel1 lg:relSubject ?start ; lg:relObject ?mid . }}
+        {{ ?rel1 {lg}relSubject ?start ; {lg}relObject ?mid . }}
         UNION
-        {{ ?rel1 lg:relSubject ?mid ; lg:relObject ?start . }}
+        {{ ?rel1 {lg}relSubject ?mid ; {lg}relObject ?start . }}
       }}
       {{
-        {{ ?rel2 lg:relSubject ?mid ; lg:relObject ?end . }}
+        {{ ?rel2 {lg}relSubject ?mid ; {lg}relObject ?end . }}
         UNION
-        {{ ?rel2 lg:relSubject ?end ; lg:relObject ?mid . }}
+        {{ ?rel2 {lg}relSubject ?end ; {lg}relObject ?mid . }}
       }}
     }}
     UNION
     {{
       {{
-        {{ ?rel1 lg:relSubject ?start ; lg:relObject ?mid . }}
+        {{ ?rel1 {lg}relSubject ?start ; {lg}relObject ?mid . }}
         UNION
-        {{ ?rel1 lg:relSubject ?mid ; lg:relObject ?start . }}
+        {{ ?rel1 {lg}relSubject ?mid ; {lg}relObject ?start . }}
       }}
-      ?rel2 lg:supportedByFact ?fact .
+      ?rel2 {lg}supportedByFact ?fact .
       {{
-        {{ ?rel2 lg:relSubject ?mid ; lg:relObject ?end . }}
+        {{ ?rel2 {lg}relSubject ?mid ; {lg}relObject ?end . }}
         UNION
-        {{ ?rel2 lg:relSubject ?end ; lg:relObject ?mid . }}
+        {{ ?rel2 {lg}relSubject ?end ; {lg}relObject ?mid . }}
       }}
     }}
   }}'''
-    return _statement_ids_for_fact_pattern(client, fact_pattern, parameters)
+    return _statement_ids_for_fact_pattern(client, fact_pattern, parameters, namespace)
 
 
-def _statement_ids_for_fact_pattern(client, fact_pattern: str, parameters) -> List[Dict[str, Any]]:
+def _statement_ids_for_fact_pattern(client,
+                                    fact_pattern: str,
+                                    parameters,
+                                    namespace: NamespaceConfig) -> List[Dict[str, Any]]:
     limit = int(parameters.get('statementLimit') or 100)
-    sparql = f'''{_PREFIX}
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
 SELECT DISTINCT ?l WHERE {{
 {fact_pattern}
-  ?fact lg:supports ?statement .
+  ?fact {lg}supports ?statement .
   {{
     {{
-      ?statement lg:id ?l .
+      ?statement {lg}id ?l .
     }}
     UNION
     {{
-      ?statement lg:statementPrevious ?previous .
-      ?previous lg:id ?l .
+      ?statement {lg}statementPrevious ?previous .
+      ?previous {lg}id ?l .
     }}
     UNION
     {{
-      ?next lg:statementPrevious ?statement ;
-            lg:id ?l .
+      ?next {lg}statementPrevious ?statement ;
+            {lg}id ?l .
     }}
   }}
 }} LIMIT {limit}'''
     return [{'l': row['l']} for row in client.query(sparql) if row.get('l') is not None]
 
 
-def _facts_for_statements(client, parameters) -> List[Dict[str, Any]]:
+def _facts_for_statements(client,
+                          parameters,
+                          namespace: NamespaceConfig) -> List[Dict[str, Any]]:
     statement_ids = parameters.get('statementIds', []) or []
     if not statement_ids:
         return []
     values = ' '.join(sparql_literal(s) for s in statement_ids)
-    sparql = f'''{_PREFIX}
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
 SELECT ?statementId ?factValue WHERE {{
   VALUES ?statementId {{ {values} }}
-  ?l lg:id ?statementId .
-  ?f lg:supports ?l .
-  OPTIONAL {{ ?f lg:value ?factValue }}
+  ?l {lg}id ?statementId .
+  ?f {lg}supports ?l .
+  OPTIONAL {{ ?f {lg}value ?factValue }}
 }}'''
     rows = client.query(sparql)
     grouped: Dict[str, List[str]] = {}
@@ -217,25 +227,29 @@ SELECT ?statementId ?factValue WHERE {{
     return [{'statementId': sid, 'facts': facts} for sid, facts in grouped.items()]
 
 
-def _statements_grouped_by_topic_and_source(client, cypher: str, parameters) -> List[Dict[str, Any]]:
+def _statements_grouped_by_topic_and_source(client,
+                                            cypher: str,
+                                            parameters,
+                                            namespace: NamespaceConfig) -> List[Dict[str, Any]]:
     statement_ids = parameters.get('statementIds', []) or []
     if not statement_ids:
         return []
 
     values = ' '.join(sparql_literal(s) for s in statement_ids)
-    sparql = f'''{_PREFIX}
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
 SELECT DISTINCT ?statementId ?statementValue ?details ?chunkId ?topicId ?topicValue ?sourceId WHERE {{
   VALUES ?statementId {{ {values} }}
-  ?statement lg:id ?statementId ;
-             lg:belongsTo ?topic ;
-             lg:statementMentionedIn ?chunk .
-  OPTIONAL {{ ?statement lg:value ?statementValue }}
-  OPTIONAL {{ ?statement lg:details ?details }}
-  ?topic lg:id ?topicId .
-  OPTIONAL {{ ?topic lg:value ?topicValue }}
-  ?chunk lg:id ?chunkId ;
-         lg:extractedFrom ?source .
-  ?source lg:id ?sourceId .
+  ?statement {lg}id ?statementId ;
+             {lg}belongsTo ?topic ;
+             {lg}statementMentionedIn ?chunk .
+  OPTIONAL {{ ?statement {lg}value ?statementValue }}
+  OPTIONAL {{ ?statement {lg}details ?details }}
+  ?topic {lg}id ?topicId .
+  OPTIONAL {{ ?topic {lg}value ?topicValue }}
+  ?chunk {lg}id ?chunkId ;
+         {lg}extractedFrom ?source .
+  ?source {lg}id ?sourceId .
 }}'''
     rows = client.query(sparql)
     if not rows:
@@ -243,9 +257,9 @@ SELECT DISTINCT ?statementId ?statementValue ?details ?chunkId ?topicId ?topicVa
 
     source_ids = sorted({row['sourceId'] for row in rows if row.get('sourceId') is not None})
     chunk_ids = sorted({row['chunkId'] for row in rows if row.get('chunkId') is not None})
-    source_props = _properties_by_id(client, 'Source', source_ids)
+    source_props = _properties_by_id(client, 'Source', source_ids, namespace)
     include_chunk_details = 'metadata: properties(c)' in cypher
-    chunk_props = _properties_by_id(client, 'Chunk', chunk_ids) if include_chunk_details else {}
+    chunk_props = _properties_by_id(client, 'Chunk', chunk_ids, namespace) if include_chunk_details else {}
 
     grouped: Dict[str, Dict[str, Any]] = {}
     topic_indexes: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -324,23 +338,27 @@ SELECT DISTINCT ?statementId ?statementValue ?details ?chunkId ?topicId ?topicVa
     return results[:int(limit)] if limit is not None else results
 
 
-def _properties_by_id(client, cls: str, ids: List[str]) -> Dict[str, Dict[str, Any]]:
+def _properties_by_id(client,
+                      cls: str,
+                      ids: List[str],
+                      namespace: NamespaceConfig) -> Dict[str, Dict[str, Any]]:
     if not ids:
         return {}
     values = ' '.join(sparql_literal(i) for i in ids)
-    sparql = f'''{_PREFIX}
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
 SELECT ?id ?prop ?value WHERE {{
   VALUES ?id {{ {values} }}
-  ?node a lg:{cls} ;
-        lg:id ?id ;
+  ?node a {lg}{cls} ;
+        {lg}id ?id ;
         ?prop ?value .
-  FILTER(STRSTARTS(STR(?prop), "{LEXICAL_SCHEMA}"))
-  FILTER(?prop != lg:id)
+  FILTER(STRSTARTS(STR(?prop), "{namespace.schema_namespace}"))
+  FILTER(?prop != {lg}id)
   FILTER(isLiteral(?value))
 }}'''
     out: Dict[str, Dict[str, Any]] = {i: {} for i in ids}
     for row in client.query(sparql):
-        prop = _local_name(row.get('prop'))
+        prop = _local_name(row.get('prop'), namespace)
         if prop:
             out.setdefault(row['id'], {})[prop] = row.get('value')
     return out
@@ -366,10 +384,13 @@ def _int_or_default(value, default: int) -> int:
         return default
 
 
-def _local_name(uri) -> str:
+def _local_name(uri, namespace: NamespaceConfig) -> str:
     if not uri:
         return ''
-    return str(uri).rsplit('#', 1)[-1]
+    text = str(uri)
+    if text.startswith(namespace.schema_namespace):
+        return text[len(namespace.schema_namespace):]
+    return text.rsplit('#', 1)[-1].rsplit('/', 1)[-1]
 
 
 def _marker(cypher: str):

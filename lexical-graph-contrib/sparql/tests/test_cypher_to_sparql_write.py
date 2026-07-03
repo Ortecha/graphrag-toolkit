@@ -5,11 +5,12 @@
 
 import pytest
 
-from graphrag_toolkit_contrib.lexical_graph.storage.graph.rdfox.cypher_to_sparql_write import (
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.cypher_to_sparql_write import (
     translate_write,
     UnsupportedWriteError,
 )
-from graphrag_toolkit_contrib.lexical_graph.storage.graph.rdfox.query_router import (
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.ontology import NamespaceConfig
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.query_router import (
     classify, WRITE, READ, NOOP,
 )
 
@@ -166,6 +167,21 @@ def test_tenant_routes_to_named_graph():
               "ON CREATE SET entity.value = params.v ON MATCH SET entity.value = params.v")
     sparql = translate_write(cypher, _p({'e_id': 'e1', 'v': 'Alice'}))
     assert 'GRAPH <https://awslabs.github.io/graphrag-toolkit/lexical/tenant/acme>' in sparql
+
+
+def test_custom_namespace_renders_schema_and_instance_iris():
+    namespace = NamespaceConfig(
+        prefix='gt',
+        schema_namespace='https://example.test/schema#',
+        instance_namespace='https://example.test/data/',
+    )
+    cypher = ("// insert entities\nUNWIND $params AS params\n"
+              "MERGE (entity:`__Entity__acme__`{entityId: params.e_id})\n"
+              "ON CREATE SET entity.value = params.v ON MATCH SET entity.value = params.v")
+    sparql = translate_write(cypher, _p({'e_id': 'e1', 'v': 'Alice'}), namespace=namespace)
+    assert '<https://example.test/data/entity/e1>' in sparql
+    assert '<https://example.test/schema#value>' in sparql
+    assert 'GRAPH <https://example.test/data/tenant/acme>' in sparql
 
 
 def test_local_entity_rewrite_unsupported():

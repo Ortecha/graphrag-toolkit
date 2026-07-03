@@ -8,8 +8,11 @@ from graphrag_toolkit.lexical_graph.versioning import (
     BUILD_TIMESTAMP,
     VERSION_INDEPENDENT_ID_FIELDS,
 )
-from graphrag_toolkit_contrib.lexical_graph.storage.graph.rdfox.ontology import LEXICAL_SCHEMA
-from graphrag_toolkit_contrib.lexical_graph.storage.graph.rdfox.sparql_templates import execute_read
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.ontology import (
+    LEXICAL_SCHEMA,
+    NamespaceConfig,
+)
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_templates import execute_read
 
 
 class FakeClient:
@@ -77,3 +80,24 @@ def test_multiple_entity_search_uses_relation_fact_link():
 
     assert rows == [{'l': 'stmt-1'}]
     assert 'lg:supportedByFact ?fact' in client.queries[0]
+
+
+def test_read_templates_use_custom_prefix_and_namespace():
+    namespace = NamespaceConfig(
+        prefix='gt',
+        schema_namespace='https://example.test/schema#',
+        instance_namespace='https://example.test/data/',
+        extra_prefixes={'xsd': 'http://www.w3.org/2001/XMLSchema#'},
+    )
+    client = FakeClient()
+
+    execute_read(
+        client,
+        '// multiple entity-based graph search',
+        {'startId': 'alice', 'endIds': ['bob'], 'statementLimit': 3},
+        namespace=namespace,
+    )
+
+    assert 'PREFIX gt: <https://example.test/schema#>' in client.queries[0]
+    assert 'PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>' in client.queries[0]
+    assert 'gt:supportedByFact ?fact' in client.queries[0]

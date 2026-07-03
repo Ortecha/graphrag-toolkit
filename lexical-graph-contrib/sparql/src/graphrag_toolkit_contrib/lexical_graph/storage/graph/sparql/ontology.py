@@ -4,35 +4,97 @@
 """RDF ontology for the lexical graph.
 
 Single source of truth for the mapping between the toolkit's Labeled Property
-Graph (LPG) model and an equivalent RDF model stored in RDFox.
+Graph (LPG) model and an equivalent RDF model stored in a SPARQL endpoint.
 
-Design summary (see the approved plan):
+Design summary:
 
 * Each LPG node becomes an IRI (deterministic, derived from the node's existing
-  id) typed with an ``lg:`` class. The raw id is also stored as an ``lg:id``
-  literal so SPARQL reads can return it directly.
+  id) typed with a lexical schema class. The raw id is also stored as a lexical
+  id literal so SPARQL reads can return it directly.
 * Property-free LPG edges become plain object-property triples.
 * The two property-bearing LPG edges (``__RELATION__`` and ``__SYS_RELATION__``)
   become **intermediate relation nodes** (matching the toolkit's existing
   ``__Fact__`` / ``__SYS_Class__`` n-ary style), so edge metadata such as
   ``value`` and ``count`` lives on first-class resources. A parallel direct
-  ``lg:related`` triple is also asserted between entities so traversal queries
-  stay expressible as SPARQL property paths.
+  lexical relation triple is also asserted between entities so traversal
+  queries stay expressible as SPARQL property paths.
 * Multi-tenancy: the default tenant uses the default graph; a named tenant ``t``
   uses the named graph ``.../lexical/tenant/t``.
 """
 
 import hashlib
+import re
+from dataclasses import dataclass, field
+from typing import Mapping, Optional
 from urllib.parse import quote
-
-# Namespaces ----------------------------------------------------------------
 
 LEXICAL_SCHEMA = 'https://awslabs.github.io/graphrag-toolkit/lexical#'
 LEXICAL_BASE = 'https://awslabs.github.io/graphrag-toolkit/lexical/'
+LEXICAL_PREFIX = 'lg'
 
 RDF_TYPE = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
 
-# id-property -> (instance-IRI path segment, rdf:type class local name) --------
+_PREFIX_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_-]*$')
+
+
+@dataclass(frozen=True)
+class NamespaceConfig:
+    """Namespaces used when rendering lexical-graph RDF and SPARQL."""
+
+    prefix: str = LEXICAL_PREFIX
+    schema_namespace: str = LEXICAL_SCHEMA
+    instance_namespace: str = LEXICAL_BASE
+    extra_prefixes: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        schema = _namespace_with_separator(self.schema_namespace)
+        instance = _namespace_with_separator(self.instance_namespace, separator='/')
+
+        if not _PREFIX_RE.match(self.prefix):
+            raise ValueError(f'Invalid SPARQL prefix name: {self.prefix!r}')
+        for prefix, namespace in self.extra_prefixes.items():
+            if not _PREFIX_RE.match(prefix):
+                raise ValueError(f'Invalid SPARQL prefix name: {prefix!r}')
+            if prefix == self.prefix and namespace != schema:
+                raise ValueError(
+                    f'Extra prefix {prefix!r} conflicts with lexical_schema_namespace'
+                )
+
+        object.__setattr__(self, 'schema_namespace', schema)
+        object.__setattr__(self, 'instance_namespace', instance)
+
+    @property
+    def prefix_ref(self) -> str:
+        return f'{self.prefix}:'
+
+    def term(self, local_name: str) -> str:
+        return f'<{self.schema_namespace}{local_name}>'
+
+    def instance_iri(self, kind: str, id_value) -> str:
+        return f'<{self.instance_namespace}{kind}/{quote(str(id_value), safe="")}>'
+
+    def tenant_graph_iri(self, tenant_value) -> Optional[str]:
+        if not tenant_value:
+            return None
+        return f'<{self.instance_namespace}tenant/{quote(str(tenant_value), safe="")}>'
+
+    def sparql_prefixes(self) -> str:
+        prefixes = [(self.prefix, self.schema_namespace)]
+        prefixes.extend(
+            (prefix, namespace)
+            for prefix, namespace in sorted(self.extra_prefixes.items())
+            if prefix != self.prefix
+        )
+        return '\n'.join(f'PREFIX {prefix}: <{namespace}>' for prefix, namespace in prefixes)
+
+
+DEFAULT_NAMESPACE = NamespaceConfig()
+
+
+def _namespace_with_separator(namespace: str, separator: str = '#') -> str:
+    if namespace.endswith(('#', '/')):
+        return namespace
+    return f'{namespace}{separator}'
 
 ID_KEY_TO_KIND = {
     'sourceId': ('source', 'Source'),
@@ -54,7 +116,7 @@ LABEL_TO_ID_KEY = {
     '__SYS_Class__': 'sysClassId',
 }
 
-# property-free LPG relationship -> lg: predicate local name -------------------
+# property-free LPG relationship -> lexical predicate local name ---------------
 #
 # Domain-ambiguous edges (the same LPG type used between different node kinds)
 # are specialised per subject kind instead of carrying a union domain — see
@@ -79,8 +141,7 @@ _SPECIALISED_EDGE = {
 
 
 def edge_predicate(rel_label, subject_id_key):
-    """Resolve an LPG edge type to its lg: predicate, specialised by the subject
-    node kind for the domain-ambiguous edges (mentionedIn, previous)."""
+    """Resolve an LPG edge type to its lexical predicate local name."""
     specialised = _SPECIALISED_EDGE.get(rel_label)
     if specialised:
         return specialised[subject_id_key]
@@ -89,23 +150,23 @@ def edge_predicate(rel_label, subject_id_key):
 
 # IRI / literal helpers -------------------------------------------------------
 
-def term(local_name):
-    """Return a schema (``lg:``) IRI in angle-bracket form."""
-    return f'<{LEXICAL_SCHEMA}{local_name}>'
+def term(local_name, namespace: Optional[NamespaceConfig] = None):
+    """Return a schema IRI in angle-bracket form."""
+    return (namespace or DEFAULT_NAMESPACE).term(local_name)
 
 
-def instance_iri(kind, id_value):
+def instance_iri(kind, id_value, namespace: Optional[NamespaceConfig] = None):
     """Return a deterministic instance IRI for a node of the given kind.
 
     The id is percent-encoded so values such as ``aws::abc:def`` are legal IRIs.
     """
-    return f'<{LEXICAL_BASE}{kind}/{quote(str(id_value), safe="")}>'
+    return (namespace or DEFAULT_NAMESPACE).instance_iri(kind, id_value)
 
 
-def iri_for_id_key(id_key, id_value):
+def iri_for_id_key(id_key, id_value, namespace: Optional[NamespaceConfig] = None):
     """Return the instance IRI for a value of a known id property."""
     kind, _ = ID_KEY_TO_KIND[id_key]
-    return instance_iri(kind, id_value)
+    return instance_iri(kind, id_value, namespace)
 
 
 def class_for_id_key(id_key):
@@ -114,25 +175,26 @@ def class_for_id_key(id_key):
     return term(cls)
 
 
-def relation_iri(subject_id, predicate, object_id):
+def relation_iri(subject_id, predicate, object_id, namespace: Optional[NamespaceConfig] = None):
     """Deterministic IRI for an entity-entity relation node (edge metadata)."""
     digest = hashlib.md5(f'{subject_id}|{predicate}|{object_id}'.encode('utf-8')).hexdigest()
-    return instance_iri('rel', digest)
+    return instance_iri('rel', digest, namespace)
 
 
-def sys_relation_iri(subject_class_id, predicate, object_class_id):
+def sys_relation_iri(subject_class_id,
+                     predicate,
+                     object_class_id,
+                     namespace: Optional[NamespaceConfig] = None):
     """Deterministic IRI for a sys-class relation node (edge metadata)."""
     digest = hashlib.md5(
         f'{subject_class_id}|{predicate}|{object_class_id}'.encode('utf-8')
     ).hexdigest()
-    return instance_iri('sysrel', digest)
+    return instance_iri('sysrel', digest, namespace)
 
 
-def tenant_graph_iri(tenant_value):
+def tenant_graph_iri(tenant_value, namespace: Optional[NamespaceConfig] = None):
     """Named-graph IRI for a tenant, or ``None`` for the default tenant."""
-    if not tenant_value:
-        return None
-    return f'<{LEXICAL_BASE}tenant/{quote(str(tenant_value), safe="")}>'
+    return (namespace or DEFAULT_NAMESPACE).tenant_graph_iri(tenant_value)
 
 
 def strip_tenant(label):
