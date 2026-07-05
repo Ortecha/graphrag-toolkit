@@ -114,10 +114,9 @@ LABEL_TO_ID_KEY = {
     '__SYS_Class__': 'sysClassId',
 }
 
-# property-free LPG relationship -> lexical predicate local name ---------------
-#
+# Property-free LPG relationship -> lexical predicate local name.
 # Domain-ambiguous edges (the same LPG type used between different node kinds)
-# are specialised per subject kind instead of carrying a union domain — see
+# are specialised per subject kind instead of carrying a union domain; see
 # edge_predicate().
 
 EDGE_TO_PREDICATE = {
@@ -159,18 +158,6 @@ def instance_iri(kind, id_value, namespace: Optional[NamespaceConfig] = None):
     The id is percent-encoded so values such as ``aws::abc:def`` are legal IRIs.
     """
     return (namespace or DEFAULT_NAMESPACE).instance_iri(kind, id_value)
-
-
-def iri_for_id_key(id_key, id_value, namespace: Optional[NamespaceConfig] = None):
-    """Return the instance IRI for a value of a known id property."""
-    kind, _ = ID_KEY_TO_KIND[id_key]
-    return instance_iri(kind, id_value, namespace)
-
-
-def class_for_id_key(id_key):
-    """Return the schema class IRI for a known id property."""
-    _, cls = ID_KEY_TO_KIND[id_key]
-    return term(cls)
 
 
 def relation_iri(subject_id, predicate, object_id, namespace: Optional[NamespaceConfig] = None):

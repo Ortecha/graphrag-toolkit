@@ -15,6 +15,7 @@ system fails loudly rather than returning silently-wrong results.
 import re
 from typing import Any, Dict, List
 
+from graphrag_toolkit.lexical_graph.indexing.constants import LOCAL_ENTITY_CLASSIFICATION
 from graphrag_toolkit.lexical_graph.versioning import (
     VALID_FROM,
     VALID_TO,
@@ -26,9 +27,6 @@ from graphrag_toolkit.lexical_graph.versioning import (
 )
 
 from .ontology import DEFAULT_NAMESPACE, NamespaceConfig, sparql_literal
-
-# Mirrors graphrag_toolkit ...indexing.constants.LOCAL_ENTITY_CLASSIFICATION.
-LOCAL_ENTITY_CLASSIFICATION = '__Local_Entity__'
 
 
 class UnsupportedReadError(NotImplementedError):

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from .ontology import (
     DEFAULT_NAMESPACE,
+    ID_KEY_TO_KIND,
     NamespaceConfig,
     RDF_TYPE,
     edge_predicate,
@@ -353,7 +354,6 @@ def _detect_tenant(cypher: str) -> Optional[str]:
 
 
 def _kind_cls(id_key):
-    from .ontology import ID_KEY_TO_KIND
     return ID_KEY_TO_KIND[id_key]
 
 

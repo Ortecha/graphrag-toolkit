@@ -71,10 +71,6 @@ class SPARQLEndpointClient:
         )
         self._raise_for_status(response, sparql)
 
-    def count_triples(self) -> int:
-        rows = self.query('SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }')
-        return int(rows[0]['n']) if rows else 0
-
     def close(self) -> None:
         self._session.close()
 

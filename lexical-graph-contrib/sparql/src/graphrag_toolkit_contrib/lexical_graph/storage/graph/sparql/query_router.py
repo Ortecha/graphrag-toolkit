@@ -6,10 +6,10 @@
 The toolkit funnels every graph operation through ``_execute_query(cypher)``.
 We split those into three buckets:
 
-* ``noop``  – index/DDL or ``CALL`` procedures that have no SPARQL equivalent.
-* ``write`` – build-path mutations (``MERGE``/``SET``/``DELETE`` with no
+* ``noop`` - index/DDL or ``CALL`` procedures that have no SPARQL equivalent.
+* ``write`` - build-path mutations (``MERGE``/``SET``/``DELETE`` with no
   ``RETURN``); handed to the write translator.
-* ``read``  – ``MATCH ... RETURN`` retriever queries; handed to the read
+* ``read`` - ``MATCH ... RETURN`` retriever queries; handed to the read
   templates.
 """
 
