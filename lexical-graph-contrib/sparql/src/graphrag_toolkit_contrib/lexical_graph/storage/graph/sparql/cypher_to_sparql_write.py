@@ -15,7 +15,7 @@ Semantics mapped:
   Inserting an already-present triple is a no-op in RDF, so this is idempotent.
 * ``MERGE (a)-[:REL]->(b)`` (no edge props) -> a plain object-property triple.
 * ``MERGE (a)-[r:__RELATION__{value:p}]->(b)`` -> an intermediate relation node
-  carrying the metadata, plus a direct lexical relation triple for traversal.
+  carrying the metadata.
 * ``ON CREATE SET c=n / ON MATCH SET c=c+n`` counters -> read-modify-write
   ``DELETE/INSERT ... WHERE { OPTIONAL ... BIND(COALESCE(?c,0)+n ...) }``.
 """

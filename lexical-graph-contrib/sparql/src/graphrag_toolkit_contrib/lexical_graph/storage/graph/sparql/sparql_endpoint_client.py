@@ -15,6 +15,7 @@ except ImportError as e:
     ) from e
 
 SPARQL_JSON = 'application/sparql-results+json'
+FORM_URLENCODED = 'application/x-www-form-urlencoded'
 
 
 class SPARQLEndpointClient:
@@ -45,7 +46,11 @@ class SPARQLEndpointClient:
         response = self._session.post(
             self.query_endpoint,
             data={'query': sparql},
-            headers={**self.headers, 'Accept': SPARQL_JSON},
+            headers={
+                **self.headers,
+                'Content-Type': FORM_URLENCODED,
+                'Accept': SPARQL_JSON,
+            },
             auth=self._auth,
             timeout=self.timeout,
         )
@@ -60,7 +65,7 @@ class SPARQLEndpointClient:
         response = self._session.post(
             self.update_endpoint,
             data={'update': sparql},
-            headers=self.headers,
+            headers={**self.headers, 'Content-Type': FORM_URLENCODED},
             auth=self._auth,
             timeout=self.timeout,
         )

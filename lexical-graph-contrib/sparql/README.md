@@ -2,8 +2,9 @@
 
 RDF/SPARQL support for the AWS GraphRAG Toolkit lexical graph.
 
-`SPARQLGraphStoreFactory` / `SPARQLGraphStore` work with any SPARQL 1.1 query
-and update endpoint that supports form-encoded `query=` and `update=` requests.
+`SPARQLGraphStoreFactory` / `SPARQLGraphStore` target SPARQL 1.1 query and
+update endpoints that support form-encoded `query=` / `update=` requests and
+return SELECT/ASK results as SPARQL JSON.
 
 Unlike the other backends (Neo4j, Neptune, FalkorDB) which are all Labeled
 Property Graph / OpenCypher engines, this backend stores the lexical graph as
@@ -73,15 +74,27 @@ configuration per repository unless you are intentionally migrating data.
 
 ## RDF Model
 
-| LPG label | RDF class | LPG edge | RDF predicate |
-|---|---|---|---|
-| `__Source__` | `lg:Source` | `__EXTRACTED_FROM__` | `lg:extractedFrom` |
-| `__Chunk__` | `lg:Chunk` | `__PARENT__`/`__CHILD__` | `lg:parent`/`lg:child` |
-| `__Topic__` | `lg:Topic` | `__PREVIOUS__`/`__NEXT__` | `lg:chunkPrevious`/`lg:statementPrevious`/`lg:next` |
-| `__Statement__` | `lg:Statement` | `__BELONGS_TO__` | `lg:belongsTo` |
-| `__Fact__` | `lg:Fact` | `__MENTIONED_IN__` | `lg:statementMentionedIn`/`lg:topicMentionedIn` |
-| `__Entity__` | `lg:Entity` | `__SUPPORTS__` | `lg:supports` |
-| `__SYS_Class__` | `lg:SysClass` | `__SUBJECT__`/`__OBJECT__` | `lg:subject`/`lg:object` |
+| LPG label | RDF class |
+|---|---|
+| `__Source__` | `lg:Source` |
+| `__Chunk__` | `lg:Chunk` |
+| `__Topic__` | `lg:Topic` |
+| `__Statement__` | `lg:Statement` |
+| `__Fact__` | `lg:Fact` |
+| `__Entity__` | `lg:Entity` |
+| `__SYS_Class__` | `lg:SysClass` |
+
+| LPG edge | RDF predicate |
+|---|---|
+| `__EXTRACTED_FROM__` | `lg:extractedFrom` |
+| `__PARENT__`/`__CHILD__`/`__NEXT__` | `lg:parent`/`lg:child`/`lg:next` |
+| Chunk `__PREVIOUS__` | `lg:chunkPrevious` |
+| Statement `__PREVIOUS__` | `lg:statementPrevious` |
+| Topic `__MENTIONED_IN__` | `lg:topicMentionedIn` |
+| Statement `__MENTIONED_IN__` | `lg:statementMentionedIn` |
+| `__BELONGS_TO__` | `lg:belongsTo` |
+| `__SUPPORTS__` | `lg:supports` |
+| `__SUBJECT__`/`__OBJECT__` | `lg:subject`/`lg:object` |
 
 Each node is a deterministic IRI derived from its existing id; the raw id is
 also stored as an `lg:id` literal.
@@ -108,6 +121,12 @@ intent, for example `lg:statementMentionedIn` / `lg:topicMentionedIn` and
   `UnsupportedReadError` rather than returning wrong results.
 * Generic SPARQL store creation does not create repositories. Create the target
   repository in your triple store before building the lexical graph.
+* Versioning and delete-source maintenance queries are not implemented. Keep
+  versioning disabled when using this backend.
+* Named-tenant writes use tenant named graphs. Read templates currently query the
+  endpoint's default dataset, so tenant reads require endpoint dataset
+  configuration that exposes the tenant graph until read-side graph scoping is
+  implemented.
 * Local-entity rewrites are not yet supported; run with
   `INCLUDE_LOCAL_ENTITIES=False`.
 
@@ -116,5 +135,6 @@ intent, for example `lg:statementMentionedIn` / `lg:topicMentionedIn` and
 ```bash
 pytest lexical-graph-contrib/sparql/tests/test_cypher_to_sparql_write.py -v
 pytest lexical-graph-contrib/sparql/tests/test_sparql_templates.py -v
+pytest lexical-graph-contrib/sparql/tests/test_sparql_endpoint_client.py -v
 pytest lexical-graph-contrib/sparql/tests/test_sparql_graph_store_factory.py -v
 ```

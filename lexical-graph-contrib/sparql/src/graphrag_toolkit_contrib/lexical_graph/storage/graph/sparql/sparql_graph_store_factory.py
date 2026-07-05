@@ -43,8 +43,10 @@ class SPARQLGraphStoreFactory(GraphStoreFactoryMethod):
         if update_endpoint:
             update_endpoint = unquote(update_endpoint)
 
-        username = parsed.username or kwargs.pop('username', None) or os.environ.get('SPARQL_USER')
-        password = parsed.password or kwargs.pop('password', None) or os.environ.get('SPARQL_PASSWORD')
+        username_arg = kwargs.pop('username', None)
+        password_arg = kwargs.pop('password', None)
+        username = parsed.username or username_arg or os.environ.get('SPARQL_USER')
+        password = parsed.password or password_arg or os.environ.get('SPARQL_PASSWORD')
 
         kwargs.pop('config', None)
         logger.debug(f'Opening SPARQL graph store [query_endpoint: {query_endpoint}]')
