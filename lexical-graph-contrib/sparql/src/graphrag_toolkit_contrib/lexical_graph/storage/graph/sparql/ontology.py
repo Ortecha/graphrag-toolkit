@@ -88,13 +88,13 @@ class NamespaceConfig:
         return '\n'.join(f'PREFIX {prefix}: <{namespace}>' for prefix, namespace in prefixes)
 
 
-DEFAULT_NAMESPACE = NamespaceConfig()
-
-
 def _namespace_with_separator(namespace: str, separator: str = '#') -> str:
     if namespace.endswith(('#', '/')):
         return namespace
     return f'{namespace}{separator}'
+
+
+DEFAULT_NAMESPACE = NamespaceConfig()
 
 ID_KEY_TO_KIND = {
     'sourceId': ('source', 'Source'),
