@@ -50,7 +50,7 @@ def test_entity_node_props():
     assert '"Alice"' in sparql and '"alice"' in sparql and '"Person"' in sparql
 
 
-def test_spo_relation_node_and_direct_triple():
+def test_spo_relation_uses_relation_node_without_duplicate_direct_edge():
     cypher = ("// insert entity SPO relations\nUNWIND $params AS params\n"
               "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
               "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
@@ -59,7 +59,7 @@ def test_spo_relation_node_and_direct_triple():
     assert 'Relation>' in sparql            # intermediate relation node typed
     assert 'relSubject' in sparql and 'relObject' in sparql
     assert '"manages"' in sparql            # edge metadata preserved
-    assert 'related>' in sparql             # direct traversal triple
+    assert 'related>' not in sparql         # no duplicate direct edge
 
 
 def test_spo_relation_links_to_supporting_fact_when_available():

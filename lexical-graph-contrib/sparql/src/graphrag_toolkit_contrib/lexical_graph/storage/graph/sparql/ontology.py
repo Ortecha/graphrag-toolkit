@@ -15,9 +15,7 @@ Design summary:
 * The two property-bearing LPG edges (``__RELATION__`` and ``__SYS_RELATION__``)
   become **intermediate relation nodes** (matching the toolkit's existing
   ``__Fact__`` / ``__SYS_Class__`` n-ary style), so edge metadata such as
-  ``value`` and ``count`` lives on first-class resources. A parallel direct
-  lexical relation triple is also asserted between entities so traversal
-  queries stay expressible as SPARQL property paths.
+  ``value`` and ``count`` lives on first-class resources.
 * Multi-tenancy: the default tenant uses the default graph; a named tenant ``t``
   uses the named graph ``.../lexical/tenant/t``.
 """

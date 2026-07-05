@@ -211,7 +211,8 @@ def test_next_level_in_tree_returns_entity_and_neighbours():
             'others': ['entity-2'],
         },
     }]
-    assert 'lg:related ?other' in client.queries[0]
+    assert 'lg:relSubject ?entity' in client.queries[0]
+    assert 'lg:relObject ?other' in client.queries[0]
     assert 'FILTER(?otherId NOT IN ("entity-1"))' in client.queries[0]
 
 

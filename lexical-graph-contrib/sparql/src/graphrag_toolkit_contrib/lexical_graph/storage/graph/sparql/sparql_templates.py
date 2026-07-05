@@ -77,7 +77,7 @@ def execute_read(client,
 
     raise UnsupportedReadError(
         f'Read query not yet supported on the SPARQL backend [marker: {marker!r}]. '
-        f'Read templates are the next implementation milestone.'
+        f'No SPARQL read template is implemented for this toolkit query.'
     )
 
 
@@ -493,7 +493,9 @@ SELECT ?entityId ?value ?class ?otherId (COUNT(?fact) AS ?score) WHERE {{
           {lg}id ?entityId .
   OPTIONAL {{ ?entity {lg}value ?value }}
   OPTIONAL {{ ?entity {lg}class ?class }}
-  ?entity {lg}related ?other .
+  ?rel a {lg}Relation ;
+       {lg}relSubject ?entity ;
+       {lg}relObject ?other .
   ?other a {lg}Entity ;
          {lg}id ?otherId ;
          {lg}class ?otherClass .

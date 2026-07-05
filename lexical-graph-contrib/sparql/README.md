@@ -92,8 +92,7 @@ RDF has no native edge metadata. The two property-bearing LPG edges become
 first-class RDF resources:
 
 * `__RELATION__{value}` becomes an `lg:Relation` node with `lg:relSubject`,
-  `lg:relObject`, `lg:value`, and optional `lg:supportedByFact`; a direct
-  `lg:related` triple is also written for traversal.
+  `lg:relObject`, `lg:value`, and optional `lg:supportedByFact`.
 * `__SYS_RELATION__{value,count}` becomes an `lg:SysRelation` node with
   `lg:sysRelSubject`, `lg:sysRelObject`, `lg:value`, and `lg:count`.
 

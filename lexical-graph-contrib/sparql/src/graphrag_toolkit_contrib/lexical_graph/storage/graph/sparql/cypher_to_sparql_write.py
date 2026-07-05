@@ -225,7 +225,6 @@ def _relation(subject_id, object_id, predicate_value, graph, namespace: Namespac
         f'{rel} {RDF_TYPE} {term("Relation", namespace)} .',
         f'{rel} {term("relSubject", namespace)} {s_iri} .',
         f'{rel} {term("relObject", namespace)} {o_iri} .',
-        f'{s_iri} {term("related", namespace)} {o_iri} .',
     ]
     if predicate_value is not None:
         triples.append(f'{rel} {term("value", namespace)} {_lit(predicate_value)} .')
