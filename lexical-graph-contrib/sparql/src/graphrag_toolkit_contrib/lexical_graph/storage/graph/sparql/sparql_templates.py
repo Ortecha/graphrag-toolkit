@@ -46,6 +46,26 @@ def execute_read(client,
         return _statements_grouped_by_topic_and_source(client, cypher, parameters, namespace)
     if marker.startswith('get facts for statements'):
         return _facts_for_statements(client, parameters, namespace)
+    if marker.startswith('get chunk content'):
+        return _chunk_content(client, parameters, namespace)
+    if marker.startswith('chunk-based graph search'):
+        return _chunk_based_graph_search(client, parameters, namespace)
+    if marker.startswith('chunk-based entity network search'):
+        return _chunk_based_entity_network_search(client, parameters, namespace)
+    if marker.startswith('topic-based entity network search'):
+        return _topic_based_entity_network_search(client, parameters, namespace)
+    if marker.startswith('get topic content'):
+        return _topic_content(client, parameters, namespace)
+    if marker.startswith('get entities for keywords'):
+        return _entities_for_keywords(client, cypher, parameters, namespace)
+    if marker.startswith('get entities for chunk ids'):
+        return _entities_for_chunk_ids(client, parameters, namespace)
+    if marker.startswith('get entities for topic ids'):
+        return _entities_for_topic_ids(client, parameters, namespace)
+    if marker.startswith('get next level in tree'):
+        return _next_level_in_tree(client, parameters, namespace)
+    if marker.startswith('expand entities: score entities by number of relations'):
+        return _expand_entities(client, parameters, namespace)
     if marker.startswith('single entity-based graph search'):
         return _single_entity_based_graph_search(client, parameters, namespace)
     if marker.startswith('multiple entity-based graph search'):
@@ -225,6 +245,305 @@ SELECT ?statementId ?factValue WHERE {{
         if fact_value is not None and fact_value not in grouped[sid]:
             grouped[sid].append(fact_value)
     return [{'statementId': sid, 'facts': facts} for sid, facts in grouped.items()]
+
+
+def _chunk_content(client,
+                   parameters,
+                   namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    chunk_ids = parameters.get('nodeIds', []) or []
+    if not chunk_ids:
+        return []
+    values = ' '.join(sparql_literal(chunk_id) for chunk_id in chunk_ids)
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?content WHERE {{
+  VALUES ?chunkId {{ {values} }}
+  ?chunk a {lg}Chunk ;
+         {lg}id ?chunkId .
+  OPTIONAL {{ ?chunk {lg}value ?content }}
+}}'''
+    return [{'content': row.get('content') or ''} for row in client.query(sparql)]
+
+
+def _chunk_based_graph_search(client,
+                              parameters,
+                              namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    return _statement_ids_for_chunk_id(
+        client,
+        parameters.get('chunkId'),
+        int(parameters.get('statementLimit') or 100),
+        namespace,
+    )
+
+
+def _chunk_based_entity_network_search(client,
+                                       parameters,
+                                       namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    return _statement_ids_for_chunk_id(
+        client,
+        parameters.get('nodeId'),
+        int(parameters.get('statementLimit') or 100),
+        namespace,
+    )
+
+
+def _topic_based_entity_network_search(client,
+                                       parameters,
+                                       namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    topic_id = parameters.get('nodeId')
+    if not topic_id:
+        return []
+    lg = namespace.prefix_ref
+    limit = int(parameters.get('statementLimit') or 100)
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT DISTINCT ?l WHERE {{
+  ?topic a {lg}Topic ;
+         {lg}id {sparql_literal(topic_id)} .
+  ?statement a {lg}Statement ;
+             {lg}belongsTo ?topic ;
+             {lg}id ?l .
+}} LIMIT {limit}'''
+    return [{'l': row['l']} for row in client.query(sparql) if row.get('l') is not None]
+
+
+def _topic_content(client,
+                   parameters,
+                   namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    topic_id = parameters.get('topicId')
+    if not topic_id:
+        return []
+    lg = namespace.prefix_ref
+    limit = int(parameters.get('statementLimit') or 100)
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?statement ?details (COUNT(DISTINCT ?fact) AS ?score) WHERE {{
+  ?topic a {lg}Topic ;
+         {lg}id {sparql_literal(topic_id)} .
+  ?statementNode a {lg}Statement ;
+                 {lg}belongsTo ?topic .
+  OPTIONAL {{ ?statementNode {lg}value ?statement }}
+  OPTIONAL {{ ?statementNode {lg}details ?details }}
+  OPTIONAL {{ ?fact {lg}supports ?statementNode }}
+}} GROUP BY ?statement ?details
+ORDER BY DESC(?score)
+LIMIT {limit}'''
+    return [
+        {'statement': row.get('statement') or '', 'details': row.get('details') or ''}
+        for row in client.query(sparql)
+    ]
+
+
+def _statement_ids_for_chunk_id(client,
+                                chunk_id,
+                                limit: int,
+                                namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    if not chunk_id:
+        return []
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT DISTINCT ?l WHERE {{
+  ?chunk a {lg}Chunk ;
+         {lg}id {sparql_literal(chunk_id)} .
+  ?statement a {lg}Statement ;
+             {lg}belongsTo ?topic ;
+             {lg}statementMentionedIn ?chunk ;
+             {lg}id ?l .
+}} LIMIT {limit}'''
+    return [{'l': row['l']} for row in client.query(sparql) if row.get('l') is not None]
+
+
+def _entities_for_keywords(client,
+                           cypher: str,
+                           parameters,
+                           namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    keyword = parameters.get('keyword')
+    if not keyword:
+        return []
+    classification = parameters.get('classification')
+    starts_with = 'STARTS WITH $keyword' in cypher
+    class_starts_with = 'class STARTS WITH $classification' in cypher
+    lg = namespace.prefix_ref
+
+    keyword_filter = (
+        f'FILTER(STRSTARTS(?searchStr, {sparql_literal(keyword)}))'
+        if starts_with
+        else f'FILTER(?searchStr = {sparql_literal(keyword)})'
+    )
+    if classification is not None:
+        class_filter = (
+            f'FILTER(STRSTARTS(?class, {sparql_literal(classification)}))'
+            if class_starts_with
+            else f'FILTER(?class = {sparql_literal(classification)})'
+        )
+    else:
+        class_filter = f'FILTER(?class != "{LOCAL_ENTITY_CLASSIFICATION}")'
+
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
+  ?entity a {lg}Entity ;
+          {lg}id ?entityId ;
+          {lg}search_str ?searchStr ;
+          {lg}class ?class .
+  OPTIONAL {{ ?entity {lg}value ?value }}
+  {keyword_filter}
+  {class_filter}
+  VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  ?entity ?factPredicate ?fact .
+}} GROUP BY ?entityId ?value ?class
+ORDER BY DESC(?score)'''
+    return _entity_score_rows(client.query(sparql))
+
+
+def _entities_for_chunk_ids(client,
+                            parameters,
+                            namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    node_ids = parameters.get('nodeIds', []) or []
+    if not node_ids:
+        return []
+    values = ' '.join(sparql_literal(node_id) for node_id in node_ids)
+    limit = int(parameters.get('limit') or 100)
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
+  VALUES ?chunkId {{ {values} }}
+  ?chunk a {lg}Chunk ;
+         {lg}id ?chunkId .
+  ?statement a {lg}Statement ;
+             {lg}statementMentionedIn ?chunk .
+  ?fact {lg}supports ?statement .
+  ?entity a {lg}Entity ;
+          {lg}id ?entityId ;
+          {lg}class ?class ;
+          ?factPredicate ?fact .
+  OPTIONAL {{ ?entity {lg}value ?value }}
+  VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  FILTER(?class != "{LOCAL_ENTITY_CLASSIFICATION}")
+}} GROUP BY ?entityId ?value ?class
+ORDER BY DESC(?score)
+LIMIT {limit}'''
+    return _entity_score_rows(client.query(sparql))
+
+
+def _entities_for_topic_ids(client,
+                            parameters,
+                            namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    node_ids = parameters.get('nodeIds', []) or []
+    if not node_ids:
+        return []
+    values = ' '.join(sparql_literal(node_id) for node_id in node_ids)
+    limit = int(parameters.get('limit') or 100)
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
+  VALUES ?topicId {{ {values} }}
+  ?topic a {lg}Topic ;
+         {lg}id ?topicId .
+  ?statement a {lg}Statement ;
+             {lg}belongsTo ?topic .
+  ?fact {lg}supports ?statement .
+  ?entity a {lg}Entity ;
+          {lg}id ?entityId ;
+          {lg}class ?class ;
+          ?factPredicate ?fact .
+  OPTIONAL {{ ?entity {lg}value ?value }}
+  VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  FILTER(?class != "{LOCAL_ENTITY_CLASSIFICATION}")
+}} GROUP BY ?entityId ?value ?class
+ORDER BY DESC(?score)
+LIMIT {limit}'''
+    return _entity_score_rows(client.query(sparql))
+
+
+def _entity_score_rows(rows) -> List[Dict[str, Any]]:
+    out = []
+    for row in rows:
+        entity_id = row.get('entityId')
+        if entity_id is None:
+            continue
+        out.append({
+            'result': {
+                'entity': {
+                    'entityId': entity_id,
+                    'value': row.get('value') or '',
+                    'class': row.get('class') or '',
+                },
+                'score': float(row.get('score') or 0),
+            },
+        })
+    return out
+
+
+def _next_level_in_tree(client,
+                        parameters,
+                        namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    entity_ids = parameters.get('entityIds', []) or []
+    if not entity_ids:
+        return []
+    excluded = set(parameters.get('excludeEntityIds', []) or [])
+    num_neighbours = int(parameters.get('numNeighbours') or 5)
+    values = ' '.join(sparql_literal(entity_id) for entity_id in entity_ids)
+    exclude_filter = ''
+    if excluded:
+        excluded_values = ', '.join(sparql_literal(entity_id) for entity_id in excluded)
+        exclude_filter = f'FILTER(?otherId NOT IN ({excluded_values}))'
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?entityId ?value ?class ?otherId (COUNT(?fact) AS ?score) WHERE {{
+  VALUES ?entityId {{ {values} }}
+  ?entity a {lg}Entity ;
+          {lg}id ?entityId .
+  OPTIONAL {{ ?entity {lg}value ?value }}
+  OPTIONAL {{ ?entity {lg}class ?class }}
+  ?entity {lg}related ?other .
+  ?other a {lg}Entity ;
+         {lg}id ?otherId ;
+         {lg}class ?otherClass .
+  FILTER(?otherClass != "{LOCAL_ENTITY_CLASSIFICATION}")
+  {exclude_filter}
+  VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  ?other ?factPredicate ?fact .
+}} GROUP BY ?entityId ?value ?class ?otherId
+ORDER BY ?entityId DESC(?score)'''
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for row in client.query(sparql):
+        entity_id = row.get('entityId')
+        other_id = row.get('otherId')
+        if entity_id is None or other_id is None:
+            continue
+        result = grouped.setdefault(entity_id, {
+            'result': {
+                'entity': {
+                    'entityId': entity_id,
+                    'value': row.get('value') or '',
+                    'class': row.get('class') or '',
+                },
+                'others': [],
+            },
+        })
+        others = result['result']['others']
+        if other_id not in others and len(others) < num_neighbours:
+            others.append(other_id)
+    return list(grouped.values())
+
+
+def _expand_entities(client,
+                     parameters,
+                     namespace: NamespaceConfig) -> List[Dict[str, Any]]:
+    entity_ids = parameters.get('entityIds', []) or []
+    if not entity_ids:
+        return []
+    values = ' '.join(sparql_literal(entity_id) for entity_id in entity_ids)
+    lg = namespace.prefix_ref
+    sparql = f'''{namespace.sparql_prefixes()}
+SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
+  VALUES ?entityId {{ {values} }}
+  ?entity a {lg}Entity ;
+          {lg}id ?entityId ;
+          {lg}class ?class .
+  OPTIONAL {{ ?entity {lg}value ?value }}
+  VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  ?entity ?factPredicate ?fact .
+}} GROUP BY ?entityId ?value ?class'''
+    return _entity_score_rows(client.query(sparql))
 
 
 def _statements_grouped_by_topic_and_source(client,

@@ -33,6 +33,25 @@ class FakeClient:
             }]
         if 'SELECT DISTINCT ?l' in sparql:
             return [{'l': 'stmt-1'}]
+        if 'SELECT ?content' in sparql:
+            return [{'content': 'Chunk text'}]
+        if 'SELECT ?statement ?details' in sparql:
+            return [{'statement': 'Alice manages Bob', 'details': 'detail'}]
+        if 'SELECT ?entityId ?value ?class ?otherId' in sparql:
+            return [{
+                'entityId': 'entity-1',
+                'value': 'Alice',
+                'class': 'Person',
+                'otherId': 'entity-2',
+                'score': 3,
+            }]
+        if 'SELECT ?entityId ?value ?class' in sparql:
+            return [{
+                'entityId': 'entity-1',
+                'value': 'Alice',
+                'class': 'Person',
+                'score': 2,
+            }]
         if 'a lg:Source' in sparql:
             return [
                 {'id': 'source-1', 'prop': f'{LEXICAL_SCHEMA}title', 'value': 'Source title'},
@@ -80,6 +99,132 @@ def test_multiple_entity_search_uses_relation_fact_link():
 
     assert rows == [{'l': 'stmt-1'}]
     assert 'lg:supportedByFact ?fact' in client.queries[0]
+
+
+def test_get_chunk_content_returns_retriever_shape():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// get chunk content',
+        {'nodeIds': ['chunk-1']},
+    )
+
+    assert rows == [{'content': 'Chunk text'}]
+    assert 'VALUES ?chunkId { "chunk-1" }' in client.queries[0]
+
+
+def test_chunk_based_graph_search_returns_statement_ids():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// chunk-based graph search',
+        {'chunkId': 'chunk-1', 'statementLimit': 3},
+    )
+
+    assert rows == [{'l': 'stmt-1'}]
+    assert 'lg:statementMentionedIn ?chunk' in client.queries[0]
+
+
+def test_chunk_based_entity_network_search_uses_node_id_parameter():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// chunk-based entity network search',
+        {'nodeId': 'chunk-1', 'statementLimit': 3},
+    )
+
+    assert rows == [{'l': 'stmt-1'}]
+    assert 'VALUES ?chunkId' not in client.queries[0]
+    assert 'lg:id "chunk-1"' in client.queries[0]
+
+
+def test_topic_content_returns_statement_details():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// get topic content',
+        {'topicId': 'topic-1', 'statementLimit': 3},
+    )
+
+    assert rows == [{'statement': 'Alice manages Bob', 'details': 'detail'}]
+    assert 'lg:belongsTo ?topic' in client.queries[0]
+
+
+def test_entities_for_keywords_scores_fact_links():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// get entities for keywords\nWHERE entity.search_str = $keyword',
+        {'keyword': 'alice'},
+    )
+
+    assert rows == [{
+        'result': {
+            'entity': {'entityId': 'entity-1', 'value': 'Alice', 'class': 'Person'},
+            'score': 2.0,
+        },
+    }]
+    assert 'FILTER(?searchStr = "alice")' in client.queries[0]
+    assert 'VALUES ?factPredicate { lg:subject lg:object }' in client.queries[0]
+
+
+def test_entities_for_keywords_supports_starts_with_classification():
+    client = FakeClient()
+    execute_read(
+        client,
+        '// get entities for keywords\nWHERE entity.search_str STARTS WITH $keyword and entity.class STARTS WITH $classification',
+        {'keyword': 'ali', 'classification': 'Per'},
+    )
+
+    assert 'FILTER(STRSTARTS(?searchStr, "ali"))' in client.queries[0]
+    assert 'FILTER(STRSTARTS(?class, "Per"))' in client.queries[0]
+
+
+def test_entities_for_chunk_ids_scores_entities_in_matching_chunks():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// get entities for chunk ids',
+        {'nodeIds': ['chunk-1'], 'limit': 5},
+    )
+
+    assert rows[0]['result']['entity']['entityId'] == 'entity-1'
+    assert 'VALUES ?chunkId { "chunk-1" }' in client.queries[0]
+    assert 'lg:statementMentionedIn ?chunk' in client.queries[0]
+
+
+def test_next_level_in_tree_returns_entity_and_neighbours():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// get next level in tree',
+        {
+            'entityIds': ['entity-1'],
+            'excludeEntityIds': ['entity-1'],
+            'numNeighbours': 2,
+        },
+    )
+
+    assert rows == [{
+        'result': {
+            'entity': {'entityId': 'entity-1', 'value': 'Alice', 'class': 'Person'},
+            'others': ['entity-2'],
+        },
+    }]
+    assert 'lg:related ?other' in client.queries[0]
+    assert 'FILTER(?otherId NOT IN ("entity-1"))' in client.queries[0]
+
+
+def test_expand_entities_scores_requested_ids():
+    client = FakeClient()
+    rows = execute_read(
+        client,
+        '// expand entities: score entities by number of relations',
+        {'entityIds': ['entity-1']},
+    )
+
+    assert rows[0]['result']['score'] == 2.0
+    assert 'VALUES ?entityId { "entity-1" }' in client.queries[0]
 
 
 def test_read_templates_use_custom_prefix_and_namespace():
