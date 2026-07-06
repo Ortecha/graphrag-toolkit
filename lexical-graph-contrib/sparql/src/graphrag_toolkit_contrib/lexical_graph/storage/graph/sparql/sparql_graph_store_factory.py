@@ -1,8 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Factory for generic SPARQL endpoint graph stores."""
-
 import logging
 import os
 from urllib.parse import parse_qs, urlencode, unquote, urlparse, urlunparse

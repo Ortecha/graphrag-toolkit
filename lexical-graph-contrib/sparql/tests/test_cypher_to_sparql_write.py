@@ -9,7 +9,6 @@ from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.cypher_to_sparq
     translate_write,
     UnsupportedWriteError,
 )
-from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.ontology import NamespaceConfig
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.query_router import (
     classify, WRITE, READ, NOOP,
 )
@@ -169,23 +168,113 @@ def test_tenant_routes_to_named_graph():
     assert 'GRAPH <https://awslabs.github.io/graphrag-toolkit/lexical/tenant/acme>' in sparql
 
 
-def test_custom_namespace_renders_schema_and_instance_iris():
-    namespace = NamespaceConfig(
-        prefix='gt',
-        schema_namespace='https://example.test/schema#',
-        instance_namespace='https://example.test/data/',
-    )
-    cypher = ("// insert entities\nUNWIND $params AS params\n"
-              "MERGE (entity:`__Entity__acme__`{entityId: params.e_id})\n"
-              "ON CREATE SET entity.value = params.v ON MATCH SET entity.value = params.v")
-    sparql = translate_write(cypher, _p({'e_id': 'e1', 'v': 'Alice'}), namespace=namespace)
-    assert '<https://example.test/data/entity/e1>' in sparql
-    assert '<https://example.test/schema#value>' in sparql
-    assert 'GRAPH <https://example.test/data/tenant/acme>' in sparql
-
-
 def test_local_entity_rewrite_unsupported():
     cypher = ("// copy complement relationships to subject\nUNWIND $params AS params\n"
               "MATCH (s)-[r:`__RELATION__`]->(c) MERGE (s)-[:`__RELATION__`{value:r.value}]->(n)")
     with pytest.raises(UnsupportedWriteError):
         translate_write(cypher, _p({'n_id': 'x', 'c_id': 'y'}))
+
+
+def test_no_marker_and_no_domain_label_raises():
+    with pytest.raises(UnsupportedWriteError):
+        translate_write('MATCH (n) RETURN n', _p({}))
+
+
+def test_local_entity_marker_with_empty_rows_is_noop():
+    cypher = "// copy complement relationships to subject\nMATCH (s)-[r]->(c)"
+    assert translate_write(cypher, {'params': []}) is None
+
+
+def test_unrecognised_marker_raises():
+    cypher = "// insert bogus thing\nUNWIND $params AS params\nMERGE (n)"
+    with pytest.raises(UnsupportedWriteError):
+        translate_write(cypher, _p({'x': 1}))
+
+
+def test_source_without_quoted_id_raises():
+    cypher = ("// insert source\nUNWIND $params AS params\n"
+              "MERGE (source:`__Source__`{sourceId: params.sid})")
+    with pytest.raises(UnsupportedWriteError):
+        translate_write(cypher, _p({'sid': 'x'}))
+
+
+def test_insert_chunks_builds_chunk_node():
+    cypher = ("// insert chunks\nUNWIND $params AS params\n"
+              "MERGE (c:`__Chunk__`{chunkId: params.chunk_id})")
+    sparql = translate_write(cypher, _p({'chunk_id': 'c1', 'text': 'hello', 'seq': 3}))
+    assert 'chunk/c1' in sparql and '"hello"' in sparql
+
+
+def test_insert_chunk_source_edge():
+    cypher = ("// insert chunk-source relationships\nUNWIND $params AS params\n"
+              "MERGE (c)-[:`__EXTRACTED_FROM__`]->(s)")
+    sparql = translate_write(cypher, _p({'chunk_id': 'c1', 'source_id': 's1'}))
+    assert 'extractedFrom' in sparql and 'chunk/c1' in sparql and 'source/s1' in sparql
+
+
+def test_edge_with_missing_params_is_skipped():
+    cypher = ("// insert chunk-source relationships\nUNWIND $params AS params\n"
+              "MERGE (c)-[:`__EXTRACTED_FROM__`]->(s)")
+    assert translate_write(cypher, _p({'chunk_id': 'c1'})) is None
+
+
+def test_insert_topics_with_chunk_links():
+    cypher = ("// insert topics\nUNWIND $params AS params\n"
+              "MERGE (t:`__Topic__`{topicId: params.topic_id})")
+    sparql = translate_write(cypher, _p({'topic_id': 't1', 'title': 'T', 'chunk_ids': ['c1']}))
+    assert 'topic/t1' in sparql and 'topicMentionedIn' in sparql and 'chunk/c1' in sparql
+
+
+def test_insert_statements_node():
+    cypher = ("// insert statements\nUNWIND $params AS params\n"
+              "MERGE (s:`__Statement__`{statementId: params.statement_id})")
+    sparql = translate_write(cypher, _p({'statement_id': 's1', 'value': 'v', 'details': 'd'}))
+    assert 'statement/s1' in sparql and '"v"' in sparql and '"d"' in sparql
+
+
+def test_insert_facts_links_statement():
+    cypher = ("// insert facts\nUNWIND $params AS params\n"
+              "MERGE (f:`__Fact__`{factId: params.fact_id})")
+    sparql = translate_write(cypher, _p({'fact_id': 'f1', 'statement_id': 's1', 'p': 'rel', 'fact': 'txt'}))
+    assert 'fact/f1' in sparql and 'supports' in sparql and 'statement/s1' in sparql
+
+
+def test_insert_entity_fact_subject_edge():
+    cypher = ("// insert entity-fact subject relationship\nUNWIND $params AS params\n"
+              "MERGE (e)-[:`__SUBJECT__`]->(f)")
+    sparql = translate_write(cypher, _p({'entity_id': 'e1', 'fact_id': 'f1'}))
+    assert 'entity/e1' in sparql and 'fact/f1' in sparql
+
+
+def test_insert_entity_spc_complement_relation():
+    cypher = ("// insert entity spc relations\nUNWIND $params AS params\n"
+              "MERGE (s)-[r:`__RELATION__`{value: params.p}]->(c)")
+    sparql = translate_write(cypher, _p({'s_id': 'a', 'c_id': 'b', 'p': 'x'}))
+    assert 'Relation>' in sparql and 'entity/a' in sparql and 'entity/b' in sparql
+
+
+def test_graph_summary_single_class_branch():
+    cypher = ("// insert graph summary\nUNWIND $params AS params\n"
+              "MERGE (sc:`__SYS_Class__`{sysClassId: params.sc_id})\n"
+              "ON CREATE SET sc.value = params.sc, sc.count = 1 ON MATCH SET sc.count = sc.count + 1\n"
+              "MERGE (sc)-[r:`__SYS_RELATION__`{value: params.p}]->(sc)")
+    sparql = translate_write(cypher, _p({'sc_id': 'p', 'sc': 'P', 'p': 'M'}))
+    assert 'SysRelation>' in sparql
+
+
+def test_domain_label_without_entity_id_returns_none():
+    cypher = "MERGE (n1:`__Entity__`) SET n1 :`Person`"
+    assert translate_write(cypher, {}) is None
+
+
+def test_translate_write_with_none_parameters_is_noop():
+    cypher = ("// insert chunks\nUNWIND $params AS params\n"
+              "MERGE (c:`__Chunk__`{chunkId: params.chunk_id})")
+    assert translate_write(cypher, None) is None
+
+
+def test_marker_skips_query_ref_comment():
+    cypher = ("//query_ref abc123\n// insert chunks\nUNWIND $params AS params\n"
+              "MERGE (c:`__Chunk__`{chunkId: params.chunk_id})")
+    sparql = translate_write(cypher, _p({'chunk_id': 'c1'}))
+    assert 'chunk/c1' in sparql

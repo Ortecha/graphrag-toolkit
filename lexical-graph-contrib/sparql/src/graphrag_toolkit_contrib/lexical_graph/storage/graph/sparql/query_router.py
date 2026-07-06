@@ -1,18 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Classify an incoming OpenCypher statement so the store can route it.
-
-The toolkit funnels every graph operation through ``_execute_query(cypher)``.
-We split those into three buckets:
-
-* ``noop`` - index/DDL or ``CALL`` procedures that have no SPARQL equivalent.
-* ``write`` - build-path mutations (``MERGE``/``SET``/``DELETE`` with no
-  ``RETURN``); handed to the write translator.
-* ``read`` - ``MATCH ... RETURN`` retriever queries; handed to the read
-  templates.
-"""
-
 import re
 
 _INDEX_DDL = re.compile(r'\b(CREATE|DROP)\s+(\w+\s+)?INDEX\b', re.IGNORECASE)

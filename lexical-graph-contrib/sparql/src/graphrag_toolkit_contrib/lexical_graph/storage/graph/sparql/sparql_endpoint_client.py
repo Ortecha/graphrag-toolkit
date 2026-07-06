@@ -1,8 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""HTTP client for SPARQL 1.1 query and update endpoints."""
-
 from typing import Any, Dict, List, Optional
 
 try:

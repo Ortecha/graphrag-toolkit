@@ -1,25 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Translate the lexical-graph build-path OpenCypher into SPARQL updates.
-
-The toolkit's graph builders each emit a small, regular Cypher pattern that
-begins with a stable marker comment (e.g. ``// insert source``). This module
-recognises each marker and emits the equivalent SPARQL 1.1 update against the
-RDF model defined in :mod:`ontology`.
-
-Semantics mapped:
-
-* ``MERGE (n:Label{id}) ON CREATE/ON MATCH SET ...`` -> per-property
-  ``DELETE WHERE`` (clear old scalar) + ``INSERT DATA`` (type, id, props).
-  Inserting an already-present triple is a no-op in RDF, so this is idempotent.
-* ``MERGE (a)-[:REL]->(b)`` (no edge props) -> a plain object-property triple.
-* ``MERGE (a)-[r:__RELATION__{value:p}]->(b)`` -> an intermediate relation node
-  carrying the metadata.
-* ``ON CREATE SET c=n / ON MATCH SET c=c+n`` counters -> read-modify-write
-  ``DELETE/INSERT ... WHERE { OPTIONAL ... BIND(COALESCE(?c,0)+n ...) }``.
-"""
-
 import re
 from typing import Any, Dict, List, Optional
 

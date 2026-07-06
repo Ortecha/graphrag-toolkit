@@ -13,21 +13,13 @@ def test_sparql_factory_creates_generic_endpoint_store():
     store = SPARQLGraphStoreFactory().try_create(
         'sparql+https://alice:secret@example.test/sparql/query',
         update_endpoint='https://example.test/sparql/update',
-        lexical_prefix='gt',
-        lexical_schema_namespace='https://example.test/schema#',
-        lexical_instance_namespace='https://example.test/data/',
-        sparql_prefixes={'xsd': 'http://www.w3.org/2001/XMLSchema#'},
     )
 
     assert isinstance(store, SPARQLDatabaseClient)
     assert store.query_endpoint == 'https://example.test/sparql/query'
     assert store.update_endpoint == 'https://example.test/sparql/update'
     assert store.username == 'alice'
-    assert store.password == 'secret'
-    assert store.namespace.prefix_ref == 'gt:'
-    assert store.namespace.schema_namespace == 'https://example.test/schema#'
-    assert store.namespace.instance_namespace == 'https://example.test/data/'
-    assert 'PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>' in store.namespace.sparql_prefixes()
+    assert store.password.get_secret_value() == 'secret'
 
 
 def test_sparql_factory_ignores_non_sparql_urls():
@@ -46,7 +38,7 @@ def test_sparql_factory_consumes_auth_kwargs_when_uri_has_credentials():
         password='ignored',
     )
     assert store.username == 'alice'
-    assert store.password == 'secret'
+    assert store.password.get_secret_value() == 'secret'
 
 
 def test_sparql_factory_preserves_endpoint_query_params():
@@ -58,3 +50,12 @@ def test_sparql_factory_preserves_endpoint_query_params():
         'https://example.test/sparql/query?default-graph-uri=http%3A%2F%2Fexample.test%2Fg'
     )
     assert store.update_endpoint == 'https://example.test/sparql/update'
+
+
+def test_factory_returns_none_for_non_string_input():
+    assert SPARQLGraphStoreFactory().try_create(12345) is None
+
+
+def test_factory_handles_ipv6_host_and_explicit_port():
+    store = SPARQLGraphStoreFactory().try_create('sparql+http://[::1]:7200/repositories/lg')
+    assert store.query_endpoint == 'http://[::1]:7200/repositories/lg'

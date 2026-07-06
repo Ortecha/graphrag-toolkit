@@ -1,18 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Read-path SPARQL templates for the lexical-graph retrievers.
-
-Each toolkit retriever/provider issues a small, known ``MATCH ... RETURN``
-query. This module maps each one to a hand-authored SPARQL query and reshapes
-the rows into the exact ``List[dict]`` shape the calling retriever expects
-(mirroring Neo4j's ``record.data()``).
-
-Unsupported reads raise ``UnsupportedReadError`` with the query marker so the
-system fails loudly rather than returning silently-wrong results.
-"""
-
-import re
 from typing import Any, Dict, List
 
 from graphrag_toolkit.lexical_graph.indexing.constants import LOCAL_ENTITY_CLASSIFICATION

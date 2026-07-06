@@ -1,25 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""RDF ontology for the lexical graph.
-
-Single source of truth for the mapping between the toolkit's Labeled Property
-Graph (LPG) model and an equivalent RDF model stored in a SPARQL endpoint.
-
-Design summary:
-
-* Each LPG node becomes an IRI (deterministic, derived from the node's existing
-  id) typed with a lexical schema class. The raw id is also stored as a lexical
-  id literal so SPARQL reads can return it directly.
-* Property-free LPG edges become plain object-property triples.
-* The two property-bearing LPG edges (``__RELATION__`` and ``__SYS_RELATION__``)
-  become **intermediate relation nodes** (matching the toolkit's existing
-  ``__Fact__`` / ``__SYS_Class__`` n-ary style), so edge metadata such as
-  ``value`` and ``count`` lives on first-class resources.
-* Multi-tenancy: the default tenant uses the default graph; a named tenant ``t``
-  uses the named graph ``.../lexical/tenant/t``.
-"""
-
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -33,6 +14,7 @@ LEXICAL_PREFIX = 'lg'
 RDF_TYPE = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
 
 _PREFIX_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_-]*$')
+_UNSAFE_IRI_RE = re.compile(r'[\x00-\x20<>"{}|^`\\]')
 
 
 @dataclass(frozen=True)
@@ -57,6 +39,10 @@ class NamespaceConfig:
                 raise ValueError(
                     f'Extra prefix {prefix!r} conflicts with lexical_schema_namespace'
                 )
+
+        for iri in (schema, instance, *self.extra_prefixes.values()):
+            if _UNSAFE_IRI_RE.search(iri):
+                raise ValueError(f'Invalid namespace IRI (unsafe characters): {iri!r}')
 
         object.__setattr__(self, 'schema_namespace', schema)
         object.__setattr__(self, 'instance_namespace', instance)
@@ -114,11 +100,6 @@ LABEL_TO_ID_KEY = {
     '__SYS_Class__': 'sysClassId',
 }
 
-# Property-free LPG relationship -> lexical predicate local name.
-# Domain-ambiguous edges (the same LPG type used between different node kinds)
-# are specialised per subject kind instead of carrying a union domain; see
-# edge_predicate().
-
 EDGE_TO_PREDICATE = {
     '__EXTRACTED_FROM__': 'extractedFrom',
     '__PARENT__': 'parent',
@@ -130,7 +111,6 @@ EDGE_TO_PREDICATE = {
     '__OBJECT__': 'object',
 }
 
-# rel label -> {subject id-key -> specialised predicate}
 _SPECIALISED_EDGE = {
     '__MENTIONED_IN__': {'statementId': 'statementMentionedIn', 'topicId': 'topicMentionedIn'},
     '__PREVIOUS__': {'chunkId': 'chunkPrevious', 'statementId': 'statementPrevious'},
@@ -144,8 +124,6 @@ def edge_predicate(rel_label, subject_id_key):
         return specialised[subject_id_key]
     return EDGE_TO_PREDICATE[rel_label]
 
-
-# IRI / literal helpers -------------------------------------------------------
 
 def term(local_name, namespace: Optional[NamespaceConfig] = None):
     """Return a schema IRI in angle-bracket form."""
@@ -162,7 +140,7 @@ def instance_iri(kind, id_value, namespace: Optional[NamespaceConfig] = None):
 
 def relation_iri(subject_id, predicate, object_id, namespace: Optional[NamespaceConfig] = None):
     """Deterministic IRI for an entity-entity relation node (edge metadata)."""
-    digest = hashlib.md5(f'{subject_id}|{predicate}|{object_id}'.encode('utf-8')).hexdigest()
+    digest = hashlib.md5(f'{subject_id}|{predicate}|{object_id}'.encode('utf-8'), usedforsecurity=False).hexdigest()
     return instance_iri('rel', digest, namespace)
 
 
@@ -172,7 +150,8 @@ def sys_relation_iri(subject_class_id,
                      namespace: Optional[NamespaceConfig] = None):
     """Deterministic IRI for a sys-class relation node (edge metadata)."""
     digest = hashlib.md5(
-        f'{subject_class_id}|{predicate}|{object_class_id}'.encode('utf-8')
+        f'{subject_class_id}|{predicate}|{object_class_id}'.encode('utf-8'),
+        usedforsecurity=False,
     ).hexdigest()
     return instance_iri('sysrel', digest, namespace)
 
@@ -190,8 +169,6 @@ def strip_tenant(label):
     """
     if label in LABEL_TO_ID_KEY:
         return label, None
-    # tenant-suffixed form: <base><tenant>__  e.g. __Entity__acme__ where the
-    # base label is __Entity__ and the tenant is acme.
     if label.endswith('__'):
         for base in LABEL_TO_ID_KEY:
             if label.startswith(base) and len(label) > len(base):

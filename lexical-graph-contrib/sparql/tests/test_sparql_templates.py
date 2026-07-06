@@ -8,11 +8,22 @@ from graphrag_toolkit.lexical_graph.versioning import (
     BUILD_TIMESTAMP,
     VERSION_INDEPENDENT_ID_FIELDS,
 )
+import pytest
+
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.ontology import (
+    DEFAULT_NAMESPACE,
     LEXICAL_SCHEMA,
     NamespaceConfig,
+    sparql_literal,
 )
-from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_templates import execute_read
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_templates import (
+    execute_read,
+    UnsupportedReadError,
+    _entity_score_rows,
+    _int_or_default,
+    _local_name,
+    _properties_by_id,
+)
 
 
 class FakeClient:
@@ -63,6 +74,10 @@ class FakeClient:
             ]
         if 'a lg:Chunk' in sparql:
             return [{'id': 'chunk-1', 'prop': f'{LEXICAL_SCHEMA}value', 'value': 'Chunk text'}]
+        if 'SELECT ?statementId ?factValue' in sparql:
+            return [{'statementId': 's1', 'factValue': 'fa'},
+                    {'statementId': 's1', 'factValue': 'fa'},
+                    {'statementId': 's1'}]
         return []
 
 
@@ -247,3 +262,132 @@ def test_read_templates_use_custom_prefix_and_namespace():
     assert 'PREFIX gt: <https://example.test/schema#>' in client.queries[0]
     assert 'PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>' in client.queries[0]
     assert 'gt:supportedByFact ?fact' in client.queries[0]
+
+
+def test_injection_defenses_escape_values_and_reject_unsafe_namespaces():
+    # string values cannot break out of a SPARQL literal
+    assert sparql_literal('a" . } DELETE { ?s ?p ?o } #') == '"a\\" . } DELETE { ?s ?p ?o } #"'
+    # unsafe namespace IRIs are rejected before any SPARQL is generated
+    with pytest.raises(ValueError):
+        NamespaceConfig(schema_namespace='https://x/ns#>\nINSERT DATA { <a> <b> <c> } #')
+
+
+def test_facts_for_statements_groups_and_dedups():
+    rows = execute_read(FakeClient(), '// get facts for statements', {'statementIds': ['s1']})
+    assert rows == [{'statementId': 's1', 'facts': ['fa']}]
+
+
+def test_single_entity_based_graph_search():
+    client = FakeClient()
+    rows = execute_read(client, '// single entity-based graph search',
+                        {'startId': 'e1', 'statementLimit': 3})
+    assert rows == [{'l': 'stmt-1'}]
+    assert 'lg:subject ?fact' in client.queries[0]
+
+
+def test_topic_based_entity_network_search():
+    client = FakeClient()
+    rows = execute_read(client, '// topic-based entity network search',
+                        {'nodeId': 't1', 'statementLimit': 3})
+    assert rows == [{'l': 'stmt-1'}]
+    assert 'lg:belongsTo ?topic' in client.queries[0]
+
+
+def test_entities_for_topic_ids():
+    client = FakeClient()
+    rows = execute_read(client, '// get entities for topic ids', {'nodeIds': ['t1'], 'limit': 5})
+    assert rows[0]['result']['entity']['entityId'] == 'entity-1'
+    assert 'VALUES ?topicId { "t1" }' in client.queries[0]
+
+
+def test_complements_matching_subject_builds_query_and_skips_blank_rows():
+    client = FakeClient()
+    execute_read(client, '// get complements matching subject',
+                 {'params': [{'nId': 'n1'}, {'nId': None}]})
+    assert len(client.queries) == 1 and 'search_str' in client.queries[0]
+
+
+def test_subjects_matching_complement_via_real_subjects_alias():
+    client = FakeClient()
+    execute_read(client, '// get real subjects', {'nId': 'n1', 'cId': 'c1'})
+    assert 'SELECT ?n_id ?c_id' in client.queries[0]
+
+
+def test_subjects_matching_complement_skips_blank_rows():
+    client = FakeClient()
+    execute_read(client, '// get subjects matching complement',
+                 {'params': [{'nId': None, 'cId': None}]})
+    assert client.queries == []
+
+
+def test_unsupported_read_raises():
+    with pytest.raises(UnsupportedReadError):
+        execute_read(FakeClient(), 'MATCH (n) RETURN n', {})
+
+
+def test_marker_skips_query_ref_line():
+    rows = execute_read(FakeClient(), '//query_ref abc\n// get chunk content', {'nodeIds': ['chunk-1']})
+    assert rows == [{'content': 'Chunk text'}]
+
+
+@pytest.mark.parametrize('marker,params', [
+    ('// get facts for statements', {'statementIds': []}),
+    ('// get chunk content', {'nodeIds': []}),
+    ('// chunk-based graph search', {}),
+    ('// chunk-based entity network search', {}),
+    ('// single entity-based graph search', {}),
+    ('// multiple entity-based graph search', {'startId': 'a', 'endIds': []}),
+    ('// topic-based entity network search', {}),
+    ('// get topic content', {}),
+    ('// get entities for keywords', {}),
+    ('// get entities for chunk ids', {'nodeIds': []}),
+    ('// get entities for topic ids', {'nodeIds': []}),
+    ('// get next level in tree', {'entityIds': []}),
+    ('// expand entities: score entities by number of relations', {'entityIds': []}),
+    ('// get statements grouped by topic and source', {'statementIds': []}),
+    ('// get complements matching subject', {'params': []}),
+    ('// get subjects matching complement', {'params': []}),
+])
+def test_empty_params_return_empty(marker, params):
+    assert execute_read(FakeClient(), marker, params) == []
+
+
+def test_statements_grouped_returns_empty_when_query_has_no_rows():
+    class _Empty:
+        def query(self, sparql):
+            return []
+    assert execute_read(_Empty(), '// get statements grouped by topic and source',
+                        {'statementIds': ['s1']}) == []
+
+
+def test_entity_score_rows_skips_null_entities():
+    assert _entity_score_rows([
+        {'entityId': None},
+        {'entityId': 'e1', 'value': 'v', 'class': 'c', 'score': 2},
+    ]) == [{'result': {'entity': {'entityId': 'e1', 'value': 'v', 'class': 'c'}, 'score': 2.0}}]
+
+
+def test_next_level_in_tree_skips_null_rows():
+    class _NullRows:
+        def query(self, sparql):
+            return [{'entityId': None, 'otherId': None},
+                    {'entityId': 'e1', 'value': 'v', 'class': 'c', 'otherId': 'e2', 'score': 1}]
+    rows = execute_read(_NullRows(), '// get next level in tree',
+                        {'entityIds': ['e1'], 'numNeighbours': 2})
+    assert rows[0]['result']['entity']['entityId'] == 'e1'
+    assert rows[0]['result']['others'] == ['e2']
+
+
+def test_properties_by_id_returns_empty_for_no_ids():
+    assert _properties_by_id(FakeClient(), 'Source', [], DEFAULT_NAMESPACE) == {}
+
+
+def test_int_or_default_handles_none_and_bad_values():
+    assert _int_or_default(None, 5) == 5
+    assert _int_or_default('nope', 5) == 5
+    assert _int_or_default('7', 0) == 7
+
+
+def test_local_name_handles_empty_and_foreign_uris():
+    assert _local_name(None, DEFAULT_NAMESPACE) == ''
+    assert _local_name('http://other.test/foo#bar', DEFAULT_NAMESPACE) == 'bar'
