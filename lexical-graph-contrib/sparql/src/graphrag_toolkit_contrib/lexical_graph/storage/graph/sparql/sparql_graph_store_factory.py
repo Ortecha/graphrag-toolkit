@@ -14,7 +14,7 @@ from graphrag_toolkit.lexical_graph.storage.graph import (
 )
 
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_graph_store import (
-    SPARQLGraphStore,
+    SPARQLDatabaseClient,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ class SPARQLGraphStoreFactory(GraphStoreFactoryMethod):
         kwargs.pop('config', None)
         logger.debug(f'Opening SPARQL graph store [query_endpoint: {query_endpoint}]')
 
-        return SPARQLGraphStore(
+        return SPARQLDatabaseClient(
             query_endpoint=query_endpoint,
             update_endpoint=update_endpoint,
             username=username,

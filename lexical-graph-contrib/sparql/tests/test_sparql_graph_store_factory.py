@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_graph_store import (
-    SPARQLGraphStore,
+    SPARQLDatabaseClient,
 )
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_graph_store_factory import (
     SPARQLGraphStoreFactory,
@@ -19,7 +19,7 @@ def test_sparql_factory_creates_generic_endpoint_store():
         sparql_prefixes={'xsd': 'http://www.w3.org/2001/XMLSchema#'},
     )
 
-    assert isinstance(store, SPARQLGraphStore)
+    assert isinstance(store, SPARQLDatabaseClient)
     assert store.query_endpoint == 'https://example.test/sparql/query'
     assert store.update_endpoint == 'https://example.test/sparql/update'
     assert store.username == 'alice'

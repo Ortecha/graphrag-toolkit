@@ -36,7 +36,7 @@ from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_template
 logger = logging.getLogger(__name__)
 
 
-class SPARQLGraphStore(GraphStore):
+class SPARQLDatabaseClient(GraphStore):
     """Graph store that persists the lexical graph through SPARQL endpoints."""
 
     query_endpoint: str
