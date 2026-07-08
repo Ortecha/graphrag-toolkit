@@ -142,16 +142,19 @@ Domain-ambiguous edges use specialised predicates with single domain/range
 intent, for example `lg:statementMentionedIn` / `lg:topicMentionedIn` and
 `lg:chunkPrevious` / `lg:statementPrevious`.
 
-## Status
+## Current behavior
 
 * Write path: implemented for the build-path patterns used by the lexical graph
-  builders.
-* Read path: implemented incrementally. An unimplemented read raises
+  builders when local entities and versioning are disabled.
+* Read path: implemented for the default traversal-based retrieval path and
+  selected custom traversal reads. An unimplemented read raises
   `UnsupportedReadError` rather than returning wrong results.
 * Generic SPARQL store creation does not create repositories. Create the target
   repository in your triple store before building the lexical graph.
-* Versioning and delete-source maintenance queries are not implemented. Keep
-  versioning disabled when using this backend.
+* Versioned update maintenance and previous-version deletion are not
+  implemented. Keep versioning disabled when using this backend.
+* Administrative and lifecycle operations such as `get_stats()`, `get_sources()`,
+  `delete_sources()` and runtime graph-summary reads are not implemented.
 * Named-tenant writes use tenant named graphs. Read templates currently query the
   endpoint's default dataset, so tenant reads require endpoint dataset
   configuration that exposes the tenant graph until read-side graph scoping is

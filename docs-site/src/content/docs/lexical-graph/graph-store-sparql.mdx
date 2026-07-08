@@ -1,0 +1,128 @@
+---
+title: RDF / SPARQL Stores
+---
+
+### Topics
+
+  - [Overview](#overview)
+  - [Install package](#install-package)
+  - [Registering the RDF / SPARQL graph store](#registering-the-rdf--sparql-graph-store)
+  - [Creating an RDF / SPARQL graph store](#creating-an-rdf--sparql-graph-store)
+    - [Connection string schemes](#connection-string-schemes)
+    - [Separate query and update endpoints](#separate-query-and-update-endpoints)
+    - [Credentials and headers](#credentials-and-headers)
+  - [RDF model mapping](#rdf-model-mapping)
+    - [Reified relationships](#reified-relationships)
+
+### Overview
+
+You can use an RDF graph store that exposes SPARQL 1.1 query and update endpoints as a graph store.
+
+The other graph-store backends in this section are labeled property graphs queried with openCypher. The RDF / SPARQL backend stores the same lexical graph as RDF triples. Build-path writes are translated to SPARQL updates, and retriever reads run against SPARQL templates.
+
+The backend targets endpoints that accept form-encoded `query=` / `update=` requests and return SPARQL JSON for `SELECT` and `ASK` results.
+
+### Install package
+
+The RDF / SPARQL graph store is contained in a separate contributor package. To install it:
+
+```
+!pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/heads/main.zip#subdirectory=lexical-graph-contrib/sparql
+```
+
+### Registering the RDF / SPARQL graph store
+
+Before creating an RDF / SPARQL graph store, you must register the `SPARQLGraphStoreFactory` with the `GraphStoreFactory`:
+
+```python
+from graphrag_toolkit.lexical_graph.storage import GraphStoreFactory
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql import SPARQLGraphStoreFactory
+
+GraphStoreFactory.register(SPARQLGraphStoreFactory)
+```
+
+### Creating an RDF / SPARQL graph store
+
+Use the `GraphStoreFactory.for_graph_store()` static factory method to create an instance of an RDF / SPARQL graph store.
+
+To create an RDF / SPARQL graph store, supply a connection string that begins with a `sparql` scheme and points to the endpoint's query URL:
+
+```python
+graph_store = GraphStoreFactory.for_graph_store(
+    'sparql+https://example.test/sparql/query',
+    update_endpoint='https://example.test/sparql/update',
+)
+```
+
+The RDF / SPARQL graph store connects to an existing endpoint. It does not create the repository or dataset.
+
+The RDF / SPARQL graph store currently supports lexical-graph build writes with local entities and versioning disabled, and the read templates used by the default traversal-based retrieval path. It does not translate arbitrary Cypher; unsupported reads raise `UnsupportedReadError`, and unsupported writes raise `UnsupportedWriteError`.
+
+Leave `INCLUDE_LOCAL_ENTITIES` and [versioned updates](/graphrag-toolkit/lexical-graph/versioned-updates/) disabled. These are the defaults. Administrative and lifecycle operations such as `get_stats()`, `get_sources()`, `delete_sources()` and runtime graph-summary reads are not implemented. Tenant writes use tenant named graphs, but tenant reads are not scoped by the backend yet; use a single-tenant dataset setup unless your endpoint exposes the tenant graph in the default dataset.
+
+#### Connection string schemes
+
+The scheme selects the transport and is stripped before the request is sent.
+
+<table>
+  <thead>
+    <tr>
+      <th>Scheme</th>
+      <th>Endpoint URL produced</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>sparql://host/path</code></td>
+      <td><code>http://host/path</code></td>
+    </tr>
+    <tr>
+      <td><code>sparql+s://host/path</code></td>
+      <td><code>https://host/path</code></td>
+    </tr>
+    <tr>
+      <td><code>sparql+http://host/path</code></td>
+      <td><code>http://host/path</code></td>
+    </tr>
+    <tr>
+      <td><code>sparql+https://host/path</code></td>
+      <td><code>https://host/path</code></td>
+    </tr>
+  </tbody>
+</table>
+
+#### Separate query and update endpoints
+
+Some RDF stores serve reads and writes from one URL; others split them. Pass `update_endpoint` when the update URL differs from the query URL.
+
+You can also pass the update URL with an `update_endpoint` query parameter in the connection string. If no update endpoint is supplied, the query endpoint is used for both reads and writes.
+
+#### Credentials and headers
+
+Credentials can be supplied in the connection string, with `username` / `password` keyword arguments, or with the `SPARQL_USER` / `SPARQL_PASSWORD` environment variables.
+
+Extra HTTP headers can be passed with `headers={...}`.
+
+### RDF model mapping
+
+The lexical graph model does not change. Sources, chunks, topics, statements, facts and entities are still the domain objects. What changes is the storage shape.
+
+![How the lexical graph maps from a property graph shape to RDF triples](../../../content/images/sparql-model-mapping.png)
+
+Nodes become IRIs. A node label becomes an `rdf:type`, the original id is stored as `lg:id`, and node properties become RDF literals.
+
+Edges without properties become predicates. For example, `__EXTRACTED_FROM__` becomes `lg:extractedFrom`, and `__SUPPORTS__` becomes `lg:supports`.
+
+Some property-graph edge types are split into more specific RDF predicates where the source and target types differ. For example, `__MENTIONED_IN__` maps to `lg:statementMentionedIn` or `lg:topicMentionedIn`.
+
+The full class and predicate mapping is in the [SPARQL contributor README](https://github.com/awslabs/graphrag-toolkit/blob/main/lexical-graph-contrib/sparql/README.md).
+
+#### Reified relationships
+
+Entity `RELATION` edges carry their own `value`, such as `"PRODUCES"`. RDF triples cannot attach properties to an edge, so these relationships are represented as nodes.
+
+![How a property-graph relationship is reified into RDF](../../../content/images/sparql-reification.png)
+
+An entity-to-entity `RELATION` becomes an `lg:Relation` node with `lg:relSubject`, `lg:relObject`, `lg:value` and optional `lg:supportedByFact` predicates. Class-level `SYS_RELATION` edges are represented as `lg:SysRelation` nodes and also store their count.
+
+Reads reverse this shape so retrievers still receive openCypher-shaped results.
