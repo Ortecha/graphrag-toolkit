@@ -2,7 +2,7 @@
 
 RDF/SPARQL support for the AWS GraphRAG Toolkit lexical graph.
 
-`SPARQLGraphStoreFactory` / `SPARQLGraphStore` target SPARQL 1.1 query and
+`SPARQLGraphStoreFactory` / `SPARQLDatabaseClient` target SPARQL 1.1 query and
 update endpoints that support form-encoded `query=` / `update=` requests and
 return SELECT/ASK results as SPARQL JSON.
 
@@ -74,6 +74,23 @@ configuration per repository unless you are intentionally migrating data.
 
 ## RDF Model
 
+The lexical graph is the same on every backend — the same sources, chunks,
+topics, statements, facts and entities described in the
+[graph model](https://awslabs.github.io/graphrag-toolkit/lexical-graph/graph-model/).
+What changes here is how it's written down. A property graph and a set of RDF
+triples record the same thing in different shapes, and the move from one to the
+other happens in three steps:
+
+1. **Nodes become IRIs.** Each node is a deterministic IRI derived from its
+   existing id. Its LPG label becomes an `rdf:type` (an RDF class), and the raw
+   id is kept as an `lg:id` literal so reads can match on it. Node properties
+   become plain triples.
+2. **Edges become predicates.** An edge with no properties of its own is just a
+   link between two nodes, so it maps straight to a predicate.
+3. **Property-bearing edges become nodes.** An edge that carries data of its own
+   can't be a single triple. See [reification](#edge-metadata-and-reification)
+   below.
+
 | LPG label | RDF class |
 |---|---|
 | `__Source__` | `lg:Source` |
@@ -96,18 +113,30 @@ configuration per repository unless you are intentionally migrating data.
 | `__SUPPORTS__` | `lg:supports` |
 | `__SUBJECT__`/`__OBJECT__` | `lg:subject`/`lg:object` |
 
-Each node is a deterministic IRI derived from its existing id; the raw id is
-also stored as an `lg:id` literal.
+### Edge metadata and reification
 
-### Edge Metadata
+Most edges above are plain links, so they map straight to a predicate. One edge
+type is different: the `__RELATION__` between two entities carries a `value`
+(e.g. `"PRODUCES"`). A property graph can hang that value on the edge itself;
+RDF can't, because a triple is only subject–predicate–object, with nowhere to
+put it.
 
-RDF has no native edge metadata. The two property-bearing LPG edges become
-first-class RDF resources:
+**Reification** is the standard RDF workaround: turn the edge into a node of its
+own, then point that node back at the original subject and object. It's now an
+ordinary resource, so it can carry the `value` and link to the `Fact` that
+supports it.
+
+![How a property-graph relationship is reified into RDF](images/reification.png)
+
+The two property-bearing LPG edges are reified this way:
 
 * `__RELATION__{value}` becomes an `lg:Relation` node with `lg:relSubject`,
   `lg:relObject`, `lg:value`, and optional `lg:supportedByFact`.
 * `__SYS_RELATION__{value,count}` becomes an `lg:SysRelation` node with
   `lg:sysRelSubject`, `lg:sysRelObject`, `lg:value`, and `lg:count`.
+
+Reads reverse the process: the SPARQL read templates walk `lg:relSubject` /
+`lg:relObject` so that a relation looks like a single hop again.
 
 Domain-ambiguous edges use specialised predicates with single domain/range
 intent, for example `lg:statementMentionedIn` / `lg:topicMentionedIn` and
