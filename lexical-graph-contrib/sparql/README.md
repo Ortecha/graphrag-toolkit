@@ -165,5 +165,7 @@ intent, for example `lg:statementMentionedIn` / `lg:topicMentionedIn` and
 pytest lexical-graph-contrib/sparql/tests/test_cypher_to_sparql_write.py -v
 pytest lexical-graph-contrib/sparql/tests/test_sparql_templates.py -v
 pytest lexical-graph-contrib/sparql/tests/test_sparql_endpoint_client.py -v
+pytest lexical-graph-contrib/sparql/tests/test_sparql_graph_store.py -v
 pytest lexical-graph-contrib/sparql/tests/test_sparql_graph_store_factory.py -v
+pytest lexical-graph-contrib/sparql/tests/test_ontology.py -v
 ```
