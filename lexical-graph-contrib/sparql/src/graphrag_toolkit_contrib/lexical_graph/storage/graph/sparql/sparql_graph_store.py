@@ -13,6 +13,12 @@ from graphrag_toolkit.lexical_graph.storage.graph import GraphStore, NodeId, for
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.cypher_to_sparql_write import (
     translate_write,
 )
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.ontology import (
+    LEXICAL_BASE,
+    LEXICAL_PREFIX,
+    LEXICAL_SCHEMA,
+    NamespaceConfig,
+)
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.query_router import (
     NOOP,
     WRITE,
@@ -37,8 +43,13 @@ class SPARQLDatabaseClient(GraphStore):
     password: Optional[SecretStr] = None
     timeout: float = 60.0
     headers: Dict[str, str] = Field(default_factory=dict)
+    lexical_prefix: str = LEXICAL_PREFIX
+    lexical_schema_namespace: str = LEXICAL_SCHEMA
+    lexical_instance_namespace: str = LEXICAL_BASE
+    sparql_prefixes: Dict[str, str] = Field(default_factory=dict)
 
     _client: Optional[Any] = PrivateAttr(default=None)
+    _namespace: Optional[NamespaceConfig] = PrivateAttr(default=None)
 
     def __init__(self,
                  query_endpoint: str,
@@ -75,6 +86,17 @@ class SPARQLDatabaseClient(GraphStore):
             )
         return self._client
 
+    @property
+    def namespace(self) -> NamespaceConfig:
+        if self._namespace is None:
+            self._namespace = NamespaceConfig(
+                prefix=self.lexical_prefix,
+                schema_namespace=self.lexical_schema_namespace,
+                instance_namespace=self.lexical_instance_namespace,
+                extra_prefixes=dict(self.sparql_prefixes),
+            )
+        return self._namespace
+
     def node_id(self, id_name: str) -> NodeId:
         return format_id(id_name)
 
@@ -97,12 +119,12 @@ class SPARQLDatabaseClient(GraphStore):
         if kind == NOOP:
             results: List[Any] = []
         elif kind == WRITE:
-            update = translate_write(cypher, parameters)
+            update = translate_write(cypher, parameters, self.namespace)
             if update:
                 self.client.update(update)
             results = []
         else:
-            results = execute_read(self.client, cypher, parameters)
+            results = execute_read(self.client, cypher, parameters, self.namespace)
 
         if logger.isEnabledFor(logging.DEBUG):
             elapsed = int((time.time() - start) * 1000)
