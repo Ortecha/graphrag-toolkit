@@ -1,12 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the SPARQLGraphStore dispatch/lifecycle (no server)."""
+"""Unit tests for the SPARQLDatabaseClient dispatch/lifecycle (no server)."""
 
 import logging
 
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_graph_store import (
-    SPARQLGraphStore,
+    SPARQLDatabaseClient,
 )
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.sparql_endpoint_client import (
     SPARQLEndpointClient,
@@ -31,7 +31,7 @@ class _FakeClient:
 
 
 def _store(**kwargs):
-    return SPARQLGraphStore(query_endpoint='http://ex.test/query', **kwargs)
+    return SPARQLDatabaseClient(query_endpoint='http://ex.test/query', **kwargs)
 
 
 def test_node_id_formats_id():
@@ -110,3 +110,25 @@ def test_execute_query_emits_debug_timing(caplog):
     with caplog.at_level(logging.DEBUG, logger=logger_name):
         store._execute_query('CALL db.indexes()')
     assert any('(noop)' in record.getMessage() for record in caplog.records)
+
+
+def test_namespace_kwargs_thread_into_writes_and_reads():
+    store = _store(
+        lexical_prefix='gt',
+        lexical_schema_namespace='https://example.test/schema#',
+        lexical_instance_namespace='https://example.test/data/',
+        sparql_prefixes={'xsd': 'http://www.w3.org/2001/XMLSchema#'},
+    )
+    fake = _FakeClient()
+    store._client = fake
+
+    store._execute_query(
+        "// insert entities\nUNWIND $params AS params\n"
+        "MERGE (e:`__Entity__`{entityId: params.e_id})",
+        {'params': [{'e_id': 'e1', 'v': 'Alice'}]},
+    )
+    assert '<https://example.test/data/entity/e1>' in fake.updates[0]
+
+    store._execute_query('// multiple entity-based graph search',
+                         {'startId': 'e1', 'endIds': ['e2'], 'statementLimit': 3})
+    assert 'PREFIX gt: <https://example.test/schema#>' in fake.queries[0]

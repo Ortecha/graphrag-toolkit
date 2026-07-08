@@ -9,6 +9,9 @@ from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.cypher_to_sparq
     translate_write,
     UnsupportedWriteError,
 )
+from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.ontology import (
+    NamespaceConfig,
+)
 from graphrag_toolkit_contrib.lexical_graph.storage.graph.sparql.query_router import (
     classify, WRITE, READ, NOOP,
 )
@@ -158,6 +161,19 @@ def test_domain_label():
     sparql = translate_write(cypher, {'entityId': 'e1'})
     assert 'entity/e1' in sparql
     assert 'Person>' in sparql
+
+
+def test_write_path_uses_custom_namespace():
+    namespace = NamespaceConfig(
+        prefix='gt',
+        schema_namespace='https://example.test/schema#',
+        instance_namespace='https://example.test/data/',
+    )
+    cypher = ("// insert chunks\nUNWIND $params AS params\n"
+              "MERGE (c:`__Chunk__`{chunkId: params.chunk_id})")
+    sparql = translate_write(cypher, _p({'chunk_id': 'c1', 'text': 'hello'}), namespace)
+    assert '<https://example.test/data/chunk/c1>' in sparql
+    assert '<https://example.test/schema#Chunk>' in sparql
 
 
 def test_tenant_routes_to_named_graph():
