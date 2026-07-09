@@ -11,6 +11,7 @@ title: RDF / SPARQL Stores
     - [Connection string schemes](#connection-string-schemes)
     - [Separate query and update endpoints](#separate-query-and-update-endpoints)
     - [Credentials and headers](#credentials-and-headers)
+    - [Namespace and prefix configuration](#namespace-and-prefix-configuration)
   - [RDF model mapping](#rdf-model-mapping)
     - [Reified relationships](#reified-relationships)
 
@@ -102,6 +103,57 @@ You can also pass the update URL with an `update_endpoint` query parameter in th
 Credentials can be supplied in the connection string, with `username` / `password` keyword arguments, or with the `SPARQL_USER` / `SPARQL_PASSWORD` environment variables.
 
 Extra HTTP headers can be passed with `headers={...}`.
+
+#### Namespace and prefix configuration
+
+The RDF model uses one namespace for schema terms and one namespace for instance IRIs. These values can be changed when creating the graph store.
+
+<table>
+  <thead>
+    <tr>
+      <th>Kwarg</th>
+      <th>Default</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>lexical_prefix</code></td>
+      <td><code>lg</code></td>
+      <td>Prefix emitted in generated SPARQL templates</td>
+    </tr>
+    <tr>
+      <td><code>lexical_schema_namespace</code></td>
+      <td><code>https://awslabs.github.io/graphrag-toolkit/lexical#</code></td>
+      <td>Classes and predicates such as <code>lg:Entity</code> and <code>lg:supportedByFact</code></td>
+    </tr>
+    <tr>
+      <td><code>lexical_instance_namespace</code></td>
+      <td><code>https://awslabs.github.io/graphrag-toolkit/lexical/</code></td>
+      <td>Instance IRIs for sources, chunks, entities, facts, relation nodes, and tenant named graphs</td>
+    </tr>
+    <tr>
+      <td><code>sparql_prefixes</code></td>
+      <td><code>&#123;&#125;</code></td>
+      <td>Additional prefixes included in generated read queries</td>
+    </tr>
+  </tbody>
+</table>
+
+For example:
+
+```python
+graph_store = GraphStoreFactory.for_graph_store(
+    'sparql+https://example.test/sparql/query',
+    update_endpoint='https://example.test/sparql/update',
+    lexical_prefix='gt',
+    lexical_schema_namespace='https://example.com/graphrag/schema#',
+    lexical_instance_namespace='https://example.com/graphrag/data/',
+    sparql_prefixes={'xsd': 'http://www.w3.org/2001/XMLSchema#'},
+)
+```
+
+Changing namespaces changes the IRIs written for new data. Use one namespace configuration per repository unless you are intentionally migrating data.
 
 ### RDF model mapping
 
