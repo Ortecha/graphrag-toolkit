@@ -79,11 +79,12 @@ class RDFoxGraphStore(GraphStore):
 
     def init(self, graph_store=None):
         # RDFox auto-indexes triples, so there are no indexes to create; just
-        # make sure the target data store exists.
-        target = graph_store or self
+        # make sure the data store exists. That is tenant-independent, so use
+        # this store's own client rather than `graph_store` (which may be the
+        # multi-tenant wrapper that delegates queries but exposes no client).
         try:
-            if not target.client.datastore_exists():
-                target.client.create_datastore()
+            if not self.client.datastore_exists():
+                self.client.create_datastore()
         except Exception as e:  # pragma: no cover - best-effort bootstrap
             logger.warning(f'RDFox datastore bootstrap check failed: {e}')
 

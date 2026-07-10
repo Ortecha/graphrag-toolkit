@@ -49,26 +49,27 @@ def test_entity_node_props():
     assert '"Alice"' in sparql and '"alice"' in sparql and '"Person"' in sparql
 
 
-def test_spo_relation_node_and_direct_triple():
-    cypher = ("// insert entity SPO relations\nUNWIND $params AS params\n"
-              "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
-              "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
-              "MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)")
-    sparql = translate_write(cypher, _p({'s_id': 'a', 'o_id': 'b', 'p': 'manages'}))
-    assert 'Relation>' in sparql            # intermediate relation node typed
-    assert 'relSubject' in sparql and 'relObject' in sparql
-    assert '"manages"' in sparql            # edge metadata preserved
-    assert 'related>' in sparql             # direct traversal triple
+def test_spo_and_spc_relations_are_noop():
+    # Entity-entity relations are represented by the reified Fact now, not a
+    # separate Relation node, so the SPO/SPC relation inserts produce nothing.
+    for marker in ('insert entity SPO relations', 'insert entity SPC relations'):
+        cypher = (f"// {marker}\nUNWIND $params AS params\n"
+                  "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
+                  "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
+                  "MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)")
+        assert translate_write(cypher, _p({'s_id': 'a', 'o_id': 'b', 'c_id': 'b',
+                                           'p': 'manages', 'fact_id': 'f1'})) is None
 
 
-def test_spo_relation_links_to_supporting_fact_when_available():
-    cypher = ("// insert entity SPO relations\nUNWIND $params AS params\n"
-              "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
-              "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
-              "MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)")
-    sparql = translate_write(cypher, _p({'s_id': 'a', 'o_id': 'b', 'p': 'manages', 'fact_id': 'f1'}))
-    assert 'supportedByFact>' in sparql
-    assert 'fact/f1' in sparql
+def test_entity_fact_edges_point_from_fact():
+    import re
+    # subject/object now read fact -> entity (reified), not entity -> fact
+    cypher = ("// insert entity-fact subject relationship\nUNWIND $params AS params\n"
+              "MERGE (fact:`__Fact__`{factId: params.fact_id})\n"
+              "MERGE (entity:`__Entity__`{entityId: params.entity_id})\n"
+              "MERGE (entity)-[:`__SUBJECT__`]->(fact)")
+    sparql = translate_write(cypher, _p({'fact_id': 'f1', 'entity_id': 'e1'}))
+    assert re.search(r'fact/f1>\s+<[^>]*#subject>\s+<[^>]*entity/e1>', sparql)
 
 
 def test_graph_summary_counter_is_read_modify_write():
@@ -124,15 +125,7 @@ def test_specialised_edges_avoid_union_domains():
     assert 'chunkPrevious>' in cprev
 
 
-def test_relation_vs_sysrelation_predicates_are_distinct():
-    spo = translate_write(
-        "// insert entity SPO relations\nUNWIND $params AS params\n"
-        "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
-        "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
-        "MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)",
-        _p({'s_id': 'a', 'o_id': 'b', 'p': 'manages'}))
-    assert 'relSubject>' in spo and 'relObject>' in spo and 'sysRel' not in spo
-
+def test_graph_summary_uses_sysrel():
     gs = translate_write(
         "// insert graph summary\nUNWIND $params AS params\n"
         "MERGE (sc:`__SYS_Class__`{sysClassId: params.sc_id})\n"
@@ -143,6 +136,50 @@ def test_relation_vs_sysrelation_predicates_are_distinct():
         "ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count + 1",
         _p({'sc_id': 'p', 'oc_id': 'c', 'sc': 'P', 'oc': 'C', 'p': 'M'}))
     assert 'sysRelSubject>' in gs and 'sysRelObject>' in gs
+
+
+def test_fact_is_reified_statement():
+    cypher = ("// insert facts\nUNWIND $params AS params\n"
+              "MERGE (statement:`__Statement__`{statementId: params.statement_id})\n"
+              "MERGE (fact:`__Fact__`{factId: params.fact_id})\n"
+              "ON CREATE SET fact.relation = params.p, fact.value = params.fact\n"
+              "ON MATCH SET fact.relation = params.p, fact.value = params.fact\n"
+              "MERGE (fact)-[:`__SUPPORTS__`]->(statement)")
+    # local subject AND complement object -> both stored as literals (symmetric)
+    sparql = translate_write(cypher, _p({
+        'statement_id': 's1', 'fact_id': 'f1',
+        'fact': 'a@x CONFIDENCE 95%',
+        'predicate': 'CONFIDENCE', 'subject_literal': 'a@x', 'object_literal': '95%',
+    }))
+    assert '#predicate>' in sparql                                # fact -> relation resource
+    assert 'Relation>' in sparql and 'relation/confidence>' in sparql
+    assert '"CONFIDENCE"' in sparql                               # relation label
+    assert '#subject>' in sparql and '"a@x"' in sparql            # local subject literal
+    assert '#object>' in sparql and '"95%"' in sparql            # complement object literal
+    assert '"a@x CONFIDENCE 95%"' in sparql                       # joined value kept
+    assert 'factSubject' not in sparql and 'factObject' not in sparql
+
+    # entity subject/object -> no literals (IRIs attached via the edge inserts)
+    sparql2 = translate_write(cypher, _p({
+        'statement_id': 's1', 'fact_id': 'f2',
+        'fact': 'Drift USES KS', 'predicate': 'USES',
+        'subject_literal': None, 'object_literal': None,
+    }))
+    assert '#predicate>' in sparql2
+    assert '#subject>' not in sparql2 and '#object>' not in sparql2
+
+
+def test_predicate_merges_by_normalised_value():
+    cypher = ("// insert facts\nUNWIND $params AS params\n"
+              "MERGE (statement:`__Statement__`{statementId: params.statement_id})\n"
+              "MERGE (fact:`__Fact__`{factId: params.fact_id})\n"
+              "ON CREATE SET fact.relation = params.p, fact.value = params.fact\n"
+              "ON MATCH SET fact.relation = params.p, fact.value = params.fact\n"
+              "MERGE (fact)-[:`__SUPPORTS__`]->(statement)")
+    a = translate_write(cypher, _p({'statement_id': 's', 'fact_id': 'f1', 'fact': 'x USES y', 'predicate': 'USES'}))
+    b = translate_write(cypher, _p({'statement_id': 's', 'fact_id': 'f2', 'fact': 'x uses y', 'predicate': 'uses'}))
+    # 'USES' and 'uses' collapse onto the same normalised relation resource
+    assert 'relation/uses>' in a and 'relation/uses>' in b
 
 
 def test_empty_params_is_noop():

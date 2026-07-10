@@ -113,8 +113,8 @@ def _single_entity_based_graph_search(client, parameters) -> List[Dict[str, Any]
     if not start_id:
         return []
     fact_pattern = f'''
-  ?entity lg:id {sparql_literal(start_id)} ;
-          lg:subject ?fact .'''
+  ?entity lg:id {sparql_literal(start_id)} .
+  ?fact lg:subject ?entity .'''
     return _statement_ids_for_fact_pattern(client, fact_pattern, parameters)
 
 
@@ -124,47 +124,22 @@ def _multiple_entity_based_graph_search(client, parameters) -> List[Dict[str, An
     if not start_id or not end_ids:
         return []
     end_values = ' '.join(sparql_literal(e) for e in end_ids)
+
+    def connects(fact_var, e1, e2):
+        # a reified fact linking two entities, in either direction
+        return (f'{{ {{ {fact_var} lg:subject {e1} ; lg:object {e2} . }} '
+                f'UNION {{ {fact_var} lg:subject {e2} ; lg:object {e1} . }} }}')
+
     fact_pattern = f'''
   ?start lg:id {sparql_literal(start_id)} .
   VALUES ?endId {{ {end_values} }}
   ?end lg:id ?endId .
   {{
-    {{
-      ?rel lg:supportedByFact ?fact .
-      {{
-        {{ ?rel lg:relSubject ?start ; lg:relObject ?end . }}
-        UNION
-        {{ ?rel lg:relSubject ?end ; lg:relObject ?start . }}
-      }}
-    }}
+    {connects('?fact', '?start', '?end')}
     UNION
-    {{
-      ?rel1 lg:supportedByFact ?fact .
-      {{
-        {{ ?rel1 lg:relSubject ?start ; lg:relObject ?mid . }}
-        UNION
-        {{ ?rel1 lg:relSubject ?mid ; lg:relObject ?start . }}
-      }}
-      {{
-        {{ ?rel2 lg:relSubject ?mid ; lg:relObject ?end . }}
-        UNION
-        {{ ?rel2 lg:relSubject ?end ; lg:relObject ?mid . }}
-      }}
-    }}
+    {{ ?mid a lg:Entity . {connects('?fact', '?start', '?mid')} {connects('?fact2', '?mid', '?end')} }}
     UNION
-    {{
-      {{
-        {{ ?rel1 lg:relSubject ?start ; lg:relObject ?mid . }}
-        UNION
-        {{ ?rel1 lg:relSubject ?mid ; lg:relObject ?start . }}
-      }}
-      ?rel2 lg:supportedByFact ?fact .
-      {{
-        {{ ?rel2 lg:relSubject ?mid ; lg:relObject ?end . }}
-        UNION
-        {{ ?rel2 lg:relSubject ?end ; lg:relObject ?mid . }}
-      }}
-    }}
+    {{ ?mid a lg:Entity . {connects('?fact1', '?start', '?mid')} {connects('?fact', '?mid', '?end')} }}
   }}'''
     return _statement_ids_for_fact_pattern(client, fact_pattern, parameters)
 

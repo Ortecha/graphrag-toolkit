@@ -53,55 +53,60 @@ def store():
 
 
 def test_write_and_read_round_trip(store):
+    def q(cypher, params):
+        store.execute_query_with_retry(cypher, params)
+
     # entities
-    store.execute_query_with_retry(
-        "// insert entities\nUNWIND $params AS params\n"
-        "MERGE (entity:`__Entity__`{entityId: params.e_id})\n"
-        "ON CREATE SET entity.value = params.v, entity.search_str = params.e_search_str, entity.class = params.ec\n"
-        "ON MATCH SET entity.value = params.v, entity.search_str = params.e_search_str, entity.class = params.ec",
-        _p({'e_id': 'alice', 'v': 'Alice', 'e_search_str': 'alice', 'ec': 'Person'}))
-    store.execute_query_with_retry(
-        "// insert entities\nUNWIND $params AS params\n"
-        "MERGE (entity:`__Entity__`{entityId: params.e_id})\n"
-        "ON CREATE SET entity.value = params.v, entity.search_str = params.e_search_str, entity.class = params.ec\n"
-        "ON MATCH SET entity.value = params.v, entity.search_str = params.e_search_str, entity.class = params.ec",
-        _p({'e_id': 'bob', 'v': 'Bob', 'e_search_str': 'bob', 'ec': 'Person'}))
+    for eid, val in (('alice', 'Alice'), ('bob', 'Bob')):
+        q("// insert entities\nUNWIND $params AS params\n"
+          "MERGE (entity:`__Entity__`{entityId: params.e_id})\n"
+          "ON CREATE SET entity.value = params.v, entity.search_str = params.e_search_str, entity.class = params.ec\n"
+          "ON MATCH SET entity.value = params.v, entity.search_str = params.e_search_str, entity.class = params.ec",
+          _p({'e_id': eid, 'v': val, 'e_search_str': eid, 'ec': 'Person'}))
 
-    # SPO relation (edge metadata via intermediate relation node)
-    store.execute_query_with_retry(
-        "// insert entity SPO relations\nUNWIND $params AS params\n"
-        "MERGE (subject:`__Entity__`{entityId: params.s_id})\n"
-        "MERGE (object:`__Entity__`{entityId: params.o_id})\n"
-        "MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)",
-        _p({'s_id': 'alice', 'o_id': 'bob', 'p': 'manages'}))
+    # statement
+    q("// insert statements\nUNWIND $params AS params\n"
+      "MERGE (statement:`__Statement__`{statementId: params.statement_id})\n"
+      "ON CREATE SET statement.value=params.value, statement.details=params.details\n"
+      "ON MATCH SET statement.value=params.value, statement.details=params.details",
+      _p({'statement_id': 's1', 'value': 'Alice manages Bob', 'details': 'd'}))
 
-    # statement + fact + supports
-    store.execute_query_with_retry(
-        "// insert statements\nUNWIND $params AS params\n"
-        "MERGE (statement:`__Statement__`{statementId: params.statement_id})\n"
-        "ON CREATE SET statement.value=params.value, statement.details=params.details\n"
-        "ON MATCH SET statement.value=params.value, statement.details=params.details",
-        _p({'statement_id': 's1', 'value': 'Alice manages Bob', 'details': 'd'}))
-    store.execute_query_with_retry(
+    # fact as a reified statement (entity object -> no object literal here)
+    fact_cypher = (
         "// insert facts\nUNWIND $params AS params\n"
         "MERGE (statement:`__Statement__`{statementId: params.statement_id})\n"
         "MERGE (fact:`__Fact__`{factId: params.fact_id})\n"
         "ON CREATE SET fact.relation = params.p, fact.value = params.fact\n"
         "ON MATCH SET fact.relation = params.p, fact.value = params.fact\n"
-        "MERGE (fact)-[:`__SUPPORTS__`]->(statement)",
-        _p({'statement_id': 's1', 'fact_id': 'f1', 'fact': 'Alice manages Bob'}))
+        "MERGE (fact)-[:`__SUPPORTS__`]->(statement)")
+    q(fact_cypher, _p({'statement_id': 's1', 'fact_id': 'f1', 'fact': 'Alice manages Bob',
+                       'predicate': 'manages', 'object_literal': None}))
 
-    # -- verify RDF model with SPARQL --
+    # entity-fact subject/object edges (fact -> entity)
+    for role, eid in (('subject', 'alice'), ('object', 'bob')):
+        q(f"// insert entity-fact {role} relationship\nUNWIND $params AS params\n"
+          "MERGE (fact:`__Fact__`{factId: params.fact_id})\n"
+          "MERGE (entity:`__Entity__`{entityId: params.entity_id})\n"
+          f"MERGE (entity)-[:`__{role.upper()}__`]->(fact)",
+          _p({'fact_id': 'f1', 'entity_id': eid}))
+
+    # -- verify the reified fact (predicate is a shared lg:Relation resource) --
     assert store.client.query(
-        f'{PREFIX} ASK {{ ?r a lg:Relation ; lg:value "manages" ; '
-        f'lg:relSubject ?s ; lg:relObject ?o . ?s lg:id "alice" . ?o lg:id "bob" . }}'
+        f'{PREFIX} ASK {{ ?f a lg:Fact ; lg:predicate ?r ; lg:subject ?s ; lg:object ?o . '
+        f'?r a lg:Relation ; lg:value "manages" . ?s lg:id "alice" . ?o lg:id "bob" . }}'
     )[0]['boolean']
+    # entity -> entity traversal through the fact (property path)
     assert store.client.query(
-        f'{PREFIX} ASK {{ ?s lg:id "alice" ; lg:related ?o . ?o lg:id "bob" . }}'
+        f'{PREFIX} ASK {{ ?a lg:id "alice" . ?b lg:id "bob" . ?a ^lg:subject/lg:object ?b . }}'
     )[0]['boolean']
     assert store.client.query(
         f'{PREFIX} ASK {{ ?e lg:id "alice" ; lg:class "Person" . }}'
     )[0]['boolean']
+
+    # complement object is stored directly as a literal on lg:object
+    q(fact_cypher, _p({'statement_id': 's1', 'fact_id': 'f2', 'fact': 'Accuracy CONFIDENCE 95%',
+                       'predicate': 'CONFIDENCE', 'object_literal': '95%'}))
+    assert store.client.query(f'{PREFIX} ASK {{ ?f lg:id "f2" ; lg:object "95%" . }}')[0]['boolean']
 
     # -- read template round-trips through _execute_query --
     rows = store.execute_query(
@@ -110,7 +115,8 @@ def test_write_and_read_round_trip(store):
         "WHERE l.statementId in $statementIds\n"
         "RETURN l.statementId AS statementId, collect(distinct f.value) AS facts",
         {'statementIds': ['s1']})
-    assert rows == [{'statementId': 's1', 'facts': ['Alice manages Bob']}]
+    assert rows and rows[0]['statementId'] == 's1'
+    assert 'Alice manages Bob' in rows[0]['facts']
 
 
 def test_graph_summary_counter_increments(store):

@@ -82,10 +82,27 @@ class FactGraphBuilder(GraphBuilder):
                 'MERGE (fact)-[:`__SUPPORTS__`]->(statement)'
             ]
 
+            # Passed for backends that persist the fact as a reified statement
+            # (e.g. RDFox). These are NOT referenced in the Cypher above, so
+            # Neo4j ignores them. A genuine entity subject/object is attached via
+            # the SUBJECT/OBJECT relationships; a local/complement value (which
+            # has no entity node) is passed here as a literal instead, so subject
+            # and object are handled symmetrically.
+            subject_literal = None
+            if fact.subject.classification == LOCAL_ENTITY_CLASSIFICATION and not include_local_entities:
+                subject_literal = fact.subject.value
+
+            object_literal = None
+            if not fact.object and fact.complement and not include_local_entities:
+                object_literal = fact.complement.value
+
             properties = {
                 'statement_id': fact.statementId,
                 'fact_id': fact.factId,
-                'fact': node.text
+                'fact': node.text,
+                'predicate': fact.predicate.value,
+                'subject_literal': subject_literal,
+                'object_literal': object_literal
             }
 
             query = '\n'.join(statements)

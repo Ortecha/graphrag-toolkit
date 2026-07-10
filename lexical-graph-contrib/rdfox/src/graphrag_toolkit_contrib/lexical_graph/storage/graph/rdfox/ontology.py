@@ -114,10 +114,15 @@ def class_for_id_key(id_key):
     return term(cls)
 
 
-def relation_iri(subject_id, predicate, object_id):
-    """Deterministic IRI for an entity-entity relation node (edge metadata)."""
-    digest = hashlib.md5(f'{subject_id}|{predicate}|{object_id}'.encode('utf-8')).hexdigest()
-    return instance_iri('rel', digest)
+def relation_iri(predicate_value):
+    """IRI for a shared predicate/relation resource, merged by normalised
+    (case-insensitive, space-insensitive) predicate value.
+
+    So all facts with predicate "USES"/"uses" reference one lg:Relation node,
+    the same way entities are merged by their normalised value.
+    """
+    key = str(predicate_value).lower().replace(' ', '_')
+    return instance_iri('relation', key)
 
 
 def sys_relation_iri(subject_class_id, predicate, object_class_id):
