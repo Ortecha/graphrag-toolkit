@@ -31,7 +31,10 @@ RUN pip install --no-cache-dir \
     matplotlib \
     plotly
 
-# LlamaIndex readers (hard imports in lexical-graph source)
+# LlamaIndex readers (hard imports in lexical-graph source).
+# Run as root: some reader deps upgrade packages preinstalled in the base conda
+# env (root-owned), which fails for the jovyan user with 'Permission denied: RECORD'.
+USER root
 RUN pip install --no-cache-dir \
     llama-index-readers-web \
     llama-index-readers-file \
@@ -42,6 +45,5 @@ RUN pip install --no-cache-dir \
     pymupdf
 
 # Build tools for packages requiring C compilation (e.g. lru-dict)
-USER root
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 USER jovyan
