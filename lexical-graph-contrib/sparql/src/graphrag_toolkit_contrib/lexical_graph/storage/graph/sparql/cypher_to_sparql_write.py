@@ -82,14 +82,15 @@ def translate_write(cypher: str,
         elif marker.startswith('insert facts'):
             ops.append(_fact(row, graph, namespace))
         elif marker.startswith('insert entity-fact'):
+            # Reified fact: emit fact -> entity (subject/object), not entity -> fact.
             rel = '__' + marker.split()[2].upper() + '__'
-            ops.append(_edge(row, graph, namespace, 'entityId', 'entity_id', 'factId', 'fact_id', rel))
+            ops.append(_edge(row, graph, namespace, 'factId', 'fact_id', 'entityId', 'entity_id', rel))
         elif marker.startswith('insert entities'):
             ops.append(_entity(row, graph, namespace))
-        elif marker.startswith('insert entity spo'):
-            ops.append(_relation(row['s_id'], row['o_id'], row.get('p'), graph, namespace, row.get('fact_id')))
-        elif marker.startswith('insert entity spc'):
-            ops.append(_relation(row['s_id'], row['c_id'], row.get('p'), graph, namespace, row.get('fact_id')))
+        elif marker.startswith('insert entity spo') or marker.startswith('insert entity spc'):
+            # Entity-entity relations are represented by the reified Fact itself
+            # (fact lg:subject/lg:object/lg:predicate); no separate Relation node.
+            pass
         elif marker.startswith('insert graph summary'):
             ops.append(_graph_summary(cypher, row, graph, namespace))
         else:
@@ -152,12 +153,29 @@ def _statement(row: Dict[str, Any], graph, namespace: NamespaceConfig) -> str:
 
 
 def _fact(row: Dict[str, Any], graph, namespace: NamespaceConfig) -> str:
+    # The Fact is a reified statement. Entity subject/object are attached as
+    # IRIs by the entity-fact edges; here we stamp the joined value string and -
+    # for a local/complement subject or object with no entity node - that side
+    # as a plain literal (mixed range, symmetric). The predicate points at a
+    # shared lg:Relation resource, merged by normalised value.
     props = []
-    if row.get('p') is not None:
-        props.append((term('relation', namespace), _lit(row['p'])))
     if row.get('fact') is not None:
         props.append((term('value', namespace), _lit(row['fact'])))
+    if row.get('subject_literal') is not None:
+        props.append((term('subject', namespace), _lit(row['subject_literal'])))
+    if row.get('object_literal') is not None:
+        props.append((term('object', namespace), _lit(row['object_literal'])))
+    predicate_value = row.get('predicate')
+    rel = relation_iri(predicate_value, namespace) if predicate_value is not None else None
+    if rel is not None:
+        props.append((term('predicate', namespace), rel))       # fact lg:predicate <relation>
     ops = [_node_upsert('factId', row['fact_id'], 'Fact', props, graph, namespace)]
+    if rel is not None:
+        # shared predicate resource; identical (normalised) predicates collapse
+        ops.append(_insert_data('\n'.join([
+            f'{rel} {RDF_TYPE} {term("Relation", namespace)} .',
+            f'{rel} {term("value", namespace)} {_lit(predicate_value)} .',
+        ]), graph))
     fact_iri = instance_iri('fact', row['fact_id'], namespace)
     stmt_iri = instance_iri('statement', row['statement_id'], namespace)
     triples = [
@@ -192,31 +210,6 @@ def _edge(row, graph, namespace: NamespaceConfig, a_key, a_param, b_key, b_param
         f'{b_iri} {term("id", namespace)} {_lit(row[b_param])} .',
         f'{a_iri} {predicate} {b_iri} .',
     ]
-    return _insert_data('\n'.join(triples), graph)
-
-
-def _relation(subject_id, object_id, predicate_value, graph, namespace: NamespaceConfig, fact_id=None) -> str:
-    s_iri = instance_iri('entity', subject_id, namespace)
-    o_iri = instance_iri('entity', object_id, namespace)
-    rel = relation_iri(subject_id, predicate_value, object_id, namespace)
-    triples = [
-        f'{s_iri} {RDF_TYPE} {term("Entity", namespace)} .',
-        f'{s_iri} {term("id", namespace)} {_lit(subject_id)} .',
-        f'{o_iri} {RDF_TYPE} {term("Entity", namespace)} .',
-        f'{o_iri} {term("id", namespace)} {_lit(object_id)} .',
-        f'{rel} {RDF_TYPE} {term("Relation", namespace)} .',
-        f'{rel} {term("relSubject", namespace)} {s_iri} .',
-        f'{rel} {term("relObject", namespace)} {o_iri} .',
-    ]
-    if predicate_value is not None:
-        triples.append(f'{rel} {term("value", namespace)} {_lit(predicate_value)} .')
-    if fact_id is not None:
-        fact_iri = instance_iri('fact', fact_id, namespace)
-        triples.extend([
-            f'{fact_iri} {RDF_TYPE} {term("Fact", namespace)} .',
-            f'{fact_iri} {term("id", namespace)} {_lit(fact_id)} .',
-            f'{rel} {term("supportedByFact", namespace)} {fact_iri} .',
-        ])
     return _insert_data('\n'.join(triples), graph)
 
 

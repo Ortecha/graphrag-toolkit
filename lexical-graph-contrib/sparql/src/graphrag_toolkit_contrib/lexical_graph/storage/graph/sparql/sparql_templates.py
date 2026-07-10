@@ -119,8 +119,8 @@ def _single_entity_based_graph_search(client,
         return []
     lg = namespace.prefix_ref
     fact_pattern = f'''
-  ?entity {lg}id {sparql_literal(start_id)} ;
-          {lg}subject ?fact .'''
+  ?entity {lg}id {sparql_literal(start_id)} .
+  ?fact {lg}subject ?entity .'''
     return _statement_ids_for_fact_pattern(client, fact_pattern, parameters, namespace)
 
 
@@ -133,47 +133,21 @@ def _multiple_entity_based_graph_search(client,
         return []
     lg = namespace.prefix_ref
     end_values = ' '.join(sparql_literal(e) for e in end_ids)
+    def connects(fact_var, e1, e2):
+        # a reified fact linking two entities, in either direction
+        return (f'{{ {{ {fact_var} {lg}subject {e1} ; {lg}object {e2} . }} '
+                f'UNION {{ {fact_var} {lg}subject {e2} ; {lg}object {e1} . }} }}')
+
     fact_pattern = f'''
   ?start {lg}id {sparql_literal(start_id)} .
   VALUES ?endId {{ {end_values} }}
   ?end {lg}id ?endId .
   {{
-    {{
-      ?rel {lg}supportedByFact ?fact .
-      {{
-        {{ ?rel {lg}relSubject ?start ; {lg}relObject ?end . }}
-        UNION
-        {{ ?rel {lg}relSubject ?end ; {lg}relObject ?start . }}
-      }}
-    }}
+    {connects('?fact', '?start', '?end')}
     UNION
-    {{
-      ?rel1 {lg}supportedByFact ?fact .
-      {{
-        {{ ?rel1 {lg}relSubject ?start ; {lg}relObject ?mid . }}
-        UNION
-        {{ ?rel1 {lg}relSubject ?mid ; {lg}relObject ?start . }}
-      }}
-      {{
-        {{ ?rel2 {lg}relSubject ?mid ; {lg}relObject ?end . }}
-        UNION
-        {{ ?rel2 {lg}relSubject ?end ; {lg}relObject ?mid . }}
-      }}
-    }}
+    {{ ?mid a {lg}Entity . {connects('?fact', '?start', '?mid')} {connects('?fact2', '?mid', '?end')} }}
     UNION
-    {{
-      {{
-        {{ ?rel1 {lg}relSubject ?start ; {lg}relObject ?mid . }}
-        UNION
-        {{ ?rel1 {lg}relSubject ?mid ; {lg}relObject ?start . }}
-      }}
-      ?rel2 {lg}supportedByFact ?fact .
-      {{
-        {{ ?rel2 {lg}relSubject ?mid ; {lg}relObject ?end . }}
-        UNION
-        {{ ?rel2 {lg}relSubject ?end ; {lg}relObject ?mid . }}
-      }}
-    }}
+    {{ ?mid a {lg}Entity . {connects('?fact1', '?start', '?mid')} {connects('?fact', '?mid', '?end')} }}
   }}'''
     return _statement_ids_for_fact_pattern(client, fact_pattern, parameters, namespace)
 
@@ -373,7 +347,7 @@ SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
   {keyword_filter}
   {class_filter}
   VALUES ?factPredicate {{ {lg}subject {lg}object }}
-  ?entity ?factPredicate ?fact .
+  ?fact ?factPredicate ?entity .
 }} GROUP BY ?entityId ?value ?class
 ORDER BY DESC(?score)'''
     return _entity_score_rows(client.query(sparql))
@@ -398,10 +372,10 @@ SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
   ?fact {lg}supports ?statement .
   ?entity a {lg}Entity ;
           {lg}id ?entityId ;
-          {lg}class ?class ;
-          ?factPredicate ?fact .
+          {lg}class ?class .
   OPTIONAL {{ ?entity {lg}value ?value }}
   VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  ?fact ?factPredicate ?entity .
   FILTER(?class != "{LOCAL_ENTITY_CLASSIFICATION}")
 }} GROUP BY ?entityId ?value ?class
 ORDER BY DESC(?score)
@@ -428,10 +402,10 @@ SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
   ?fact {lg}supports ?statement .
   ?entity a {lg}Entity ;
           {lg}id ?entityId ;
-          {lg}class ?class ;
-          ?factPredicate ?fact .
+          {lg}class ?class .
   OPTIONAL {{ ?entity {lg}value ?value }}
   VALUES ?factPredicate {{ {lg}subject {lg}object }}
+  ?fact ?factPredicate ?entity .
   FILTER(?class != "{LOCAL_ENTITY_CLASSIFICATION}")
 }} GROUP BY ?entityId ?value ?class
 ORDER BY DESC(?score)
@@ -479,16 +453,15 @@ SELECT ?entityId ?value ?class ?otherId (COUNT(?fact) AS ?score) WHERE {{
           {lg}id ?entityId .
   OPTIONAL {{ ?entity {lg}value ?value }}
   OPTIONAL {{ ?entity {lg}class ?class }}
-  ?rel a {lg}Relation ;
-       {lg}relSubject ?entity ;
-       {lg}relObject ?other .
+  ?relFact {lg}subject ?entity ;
+           {lg}object ?other .
   ?other a {lg}Entity ;
          {lg}id ?otherId ;
          {lg}class ?otherClass .
   FILTER(?otherClass != "{LOCAL_ENTITY_CLASSIFICATION}")
   {exclude_filter}
   VALUES ?factPredicate {{ {lg}subject {lg}object }}
-  ?other ?factPredicate ?fact .
+  ?fact ?factPredicate ?other .
 }} GROUP BY ?entityId ?value ?class ?otherId
 ORDER BY ?entityId DESC(?score)'''
     grouped: Dict[str, Dict[str, Any]] = {}
@@ -529,7 +502,7 @@ SELECT ?entityId ?value ?class (COUNT(?fact) AS ?score) WHERE {{
           {lg}class ?class .
   OPTIONAL {{ ?entity {lg}value ?value }}
   VALUES ?factPredicate {{ {lg}subject {lg}object }}
-  ?entity ?factPredicate ?fact .
+  ?fact ?factPredicate ?entity .
 }} GROUP BY ?entityId ?value ?class'''
     return _entity_score_rows(client.query(sparql))
 

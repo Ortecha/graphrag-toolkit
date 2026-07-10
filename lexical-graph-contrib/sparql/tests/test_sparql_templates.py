@@ -104,7 +104,7 @@ def test_statements_grouped_by_topic_and_source_shapes_result():
     assert result['topics'][0]['statements'][0]['statement'] == 'Alice manages Bob'
 
 
-def test_multiple_entity_search_uses_relation_fact_link():
+def test_multiple_entity_search_traverses_via_facts():
     client = FakeClient()
     rows = execute_read(
         client,
@@ -113,7 +113,10 @@ def test_multiple_entity_search_uses_relation_fact_link():
     )
 
     assert rows == [{'l': 'stmt-1'}]
-    assert 'lg:supportedByFact ?fact' in client.queries[0]
+    q = client.queries[0]
+    # entity-entity now hops through the reified Fact, not a Relation node
+    assert 'lg:supportedByFact' not in q and 'lg:relSubject' not in q
+    assert 'lg:subject' in q and 'lg:object' in q
 
 
 def test_get_chunk_content_returns_retriever_shape():
@@ -226,8 +229,9 @@ def test_next_level_in_tree_returns_entity_and_neighbours():
             'others': ['entity-2'],
         },
     }]
-    assert 'lg:relSubject ?entity' in client.queries[0]
-    assert 'lg:relObject ?other' in client.queries[0]
+    assert 'lg:subject ?entity' in client.queries[0]
+    assert 'lg:object ?other' in client.queries[0]
+    assert 'relSubject' not in client.queries[0]
     assert 'FILTER(?otherId NOT IN ("entity-1"))' in client.queries[0]
 
 
@@ -261,7 +265,7 @@ def test_read_templates_use_custom_prefix_and_namespace():
 
     assert 'PREFIX gt: <https://example.test/schema#>' in client.queries[0]
     assert 'PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>' in client.queries[0]
-    assert 'gt:supportedByFact ?fact' in client.queries[0]
+    assert 'gt:subject' in client.queries[0] and 'gt:supportedByFact' not in client.queries[0]
 
 
 def test_injection_defenses_escape_values_and_reject_unsafe_namespaces():
@@ -282,7 +286,7 @@ def test_single_entity_based_graph_search():
     rows = execute_read(client, '// single entity-based graph search',
                         {'startId': 'e1', 'statementLimit': 3})
     assert rows == [{'l': 'stmt-1'}]
-    assert 'lg:subject ?fact' in client.queries[0]
+    assert 'lg:subject ?entity' in client.queries[0]
 
 
 def test_topic_based_entity_network_search():

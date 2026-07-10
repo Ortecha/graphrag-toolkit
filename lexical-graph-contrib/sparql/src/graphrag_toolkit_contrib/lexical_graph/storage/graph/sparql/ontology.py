@@ -138,10 +138,15 @@ def instance_iri(kind, id_value, namespace: Optional[NamespaceConfig] = None):
     return (namespace or DEFAULT_NAMESPACE).instance_iri(kind, id_value)
 
 
-def relation_iri(subject_id, predicate, object_id, namespace: Optional[NamespaceConfig] = None):
-    """Deterministic IRI for an entity-entity relation node (edge metadata)."""
-    digest = hashlib.md5(f'{subject_id}|{predicate}|{object_id}'.encode('utf-8'), usedforsecurity=False).hexdigest()
-    return instance_iri('rel', digest, namespace)
+def relation_iri(predicate_value, namespace: Optional[NamespaceConfig] = None):
+    """IRI for a shared predicate/relation resource, merged by normalised
+    (case-insensitive, space-insensitive) predicate value.
+
+    So all facts with predicate "USES"/"uses" reference one lg:Relation node,
+    the same way entities are merged by their normalised value.
+    """
+    key = str(predicate_value).lower().replace(' ', '_')
+    return instance_iri('relation', key, namespace)
 
 
 def sys_relation_iri(subject_class_id,
