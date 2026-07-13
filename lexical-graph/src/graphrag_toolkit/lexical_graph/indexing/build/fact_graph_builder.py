@@ -82,10 +82,22 @@ class FactGraphBuilder(GraphBuilder):
                 'MERGE (fact)-[:`__SUPPORTS__`]->(statement)'
             ]
 
+            # RDF backends use these values to persist facts as statements.
+            subject_literal = None
+            if fact.subject.classification == LOCAL_ENTITY_CLASSIFICATION and not include_local_entities:
+                subject_literal = fact.subject.value
+
+            object_literal = None
+            if not fact.object and fact.complement and not include_local_entities:
+                object_literal = fact.complement.value
+
             properties = {
                 'statement_id': fact.statementId,
                 'fact_id': fact.factId,
-                'fact': node.text
+                'fact': node.text,
+                'predicate': fact.predicate.value,
+                'subject_literal': subject_literal,
+                'object_literal': object_literal
             }
 
             query = '\n'.join(statements)

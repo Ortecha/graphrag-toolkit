@@ -85,7 +85,8 @@ class EntityRelationGraphBuilder(GraphBuilder):
                 properties = {
                     's_id': fact.subject.entityId,
                     'o_id': fact.object.entityId,
-                    'p': fact.predicate.value
+                    'p': fact.predicate.value,
+                    'fact_id': fact.factId
                 }
             
                 query = '\n'.join(statements)
@@ -132,7 +133,8 @@ class EntityRelationGraphBuilder(GraphBuilder):
                 properties = {
                     's_id': fact.subject.entityId,
                     'c_id': fact.complement.entityId,
-                    'p': fact.predicate.value
+                    'p': fact.predicate.value,
+                    'fact_id': fact.factId
                 }
             
                 query = '\n'.join(statements)
