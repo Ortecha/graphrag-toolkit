@@ -203,7 +203,7 @@ lg:supports a owl:ObjectProperty ;
     rdfs:range lg:Statement ;
     rdfs:comment "Fact -> Statement (LPG __SUPPORTS__)." .
 
-lg:subject a owl:ObjectProperty ;
+lg:subject a rdf:Property ;
     rdfs:label "subject" ;
     rdfs:domain lg:Fact ;
     rdfs:range [
@@ -213,7 +213,7 @@ lg:subject a owl:ObjectProperty ;
     ] ;
     rdfs:comment "Reified fact -> its subject: an Entity (IRI) when the subject is a named entity, or a plain literal when it is a local/complement value (mixed range, symmetric with lg:object). LPG __SUBJECT__, reversed to read fact-first. Entity->entity traversal: ?a ^lg:subject/lg:object ?b (transitive: (^lg:subject/lg:object)+)." .
 
-lg:object a owl:ObjectProperty ;
+lg:object a rdf:Property ;
     rdfs:label "object" ;
     rdfs:domain lg:Fact ;
     rdfs:range [
